@@ -59,14 +59,14 @@ jobs:
           Set-Location $env:PRORAB_DIR
           if (!(Test-Path 'build/runtime/node.exe')) { throw "Node runtime missing" }
           if (!(Test-Path 'build/Прораб.exe')) { throw "Launcher missing" }
-          if (!(Test-Path 'dist/Prorab-Setup-0.3.0.exe')) { throw "Installer missing" }
-          $exe = Get-Item 'dist/Prorab-Setup-0.3.0.exe'
+          $exe = Get-ChildItem 'dist/Prorab-Setup-*.exe' -File | Select-Object -First 1
+          if (!$exe) { throw "Installer missing" }
           Write-Host "Installer: $($exe.Length) bytes"
           Get-FileHash $exe.FullName -Algorithm SHA256
       - name: Publish actual Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: Prorab-Windows-Setup
-          path: ${{ env.PRORAB_DIR }}/dist/Prorab-Setup-0.3.0.exe
+          path: ${{ env.PRORAB_DIR }}/dist/Prorab-Setup-*.exe
           if-no-files-found: error
           retention-days: 30
