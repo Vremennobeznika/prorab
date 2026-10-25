@@ -1,7 +1,7 @@
 name: Build Prorab Windows installer
 on:
   push:
-    branches: [main]
+    branches: [main, codex/windows-trial]
     paths:
       - '.github/workflows/build-installer.yml'
       - 'prorab-source.zip'
@@ -41,7 +41,7 @@ jobs:
           foreach ($rel in @('packaging/Prorab.iss','packaging/build-windows.ps1','package.json','web/app.js')) {
             $file = Join-Path $root $rel
             $source = Get-Content -LiteralPath $file -Raw -Encoding utf8
-            $source = $source -replace '0\.3\.[0-9]+','0.3.3'
+            $source = $source -replace '0\.3\.[0-9]+','0.3.4'
             [System.IO.File]::WriteAllText($file, $source, [System.Text.UTF8Encoding]::new($false))
           }
           Write-Host 'Installed 9 new skills, total expected: 11'
@@ -54,7 +54,11 @@ jobs:
         run: |
           Set-Location $env:PRORAB_DIR
           node --test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node qa/smoke-installed.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node qa/load-agent.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -77,6 +81,12 @@ jobs:
           if (!$exe) { throw "Installer missing" }
           Write-Host "Installer: $($exe.Length) bytes"
           Get-FileHash $exe.FullName -Algorithm SHA256
+      - name: Install, launch, persist memory, uninstall and reinstall
+        shell: pwsh
+        run: |
+          Set-Location $env:PRORAB_DIR
+          $installer = (Get-ChildItem 'dist/Prorab-Setup-*.exe' -File | Select-Object -First 1).FullName
+          ./qa/windows-installer-smoke.ps1 -Installer $installer
       - name: Publish actual Windows installer
         uses: actions/upload-artifact@v4
         with:

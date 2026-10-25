@@ -3,7 +3,8 @@
   "description": "Проверяет текстовые таблицы: пропуски, повторы и несогласованности. Пример: «Проверь данные.csv».",
   "tools": [
     "list_files",
-    "read_file"
+    "read_file",
+    "search_files"
   ],
   "mode": "manual",
   "maxSteps": 15,

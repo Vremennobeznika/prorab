@@ -3,7 +3,8 @@
   "description": "Читает TXT и Markdown, делает конспекты и сравнения. Пример: «Сделай выжимку из отчёт.md».",
   "tools": [
     "list_files",
-    "read_file"
+    "read_file",
+    "search_files"
   ],
   "mode": "manual",
   "maxSteps": 14,

@@ -4,6 +4,7 @@
   "tools": [
     "list_files",
     "read_file",
+    "search_files",
     "run_command"
   ],
   "mode": "manual",

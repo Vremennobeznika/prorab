@@ -4,6 +4,7 @@
   "tools": [
     "list_files",
     "read_file",
+    "search_files",
     "replace_in_file",
     "write_file"
   ],
