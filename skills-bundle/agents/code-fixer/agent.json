@@ -7,7 +7,9 @@
     "search_files",
     "replace_in_file",
     "write_file",
-    "run_command"
+    "run_command",
+    "update_plan",
+    "delegate_agent"
   ],
   "mode": "manual",
   "maxSteps": 20,

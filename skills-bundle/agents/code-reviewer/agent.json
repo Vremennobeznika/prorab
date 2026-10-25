@@ -4,7 +4,8 @@
   "tools": [
     "list_files",
     "read_file",
-    "search_files"
+    "search_files",
+    "update_plan"
   ],
   "mode": "manual",
   "maxSteps": 16,

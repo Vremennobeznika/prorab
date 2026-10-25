@@ -5,7 +5,8 @@
     "list_files",
     "read_file",
     "search_files",
-    "run_command"
+    "run_command",
+    "update_plan"
   ],
   "mode": "manual",
   "maxSteps": 20,

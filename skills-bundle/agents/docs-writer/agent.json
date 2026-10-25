@@ -6,7 +6,8 @@
     "read_file",
     "search_files",
     "write_file",
-    "replace_in_file"
+    "replace_in_file",
+    "update_plan"
   ],
   "mode": "manual",
   "maxSteps": 16,
