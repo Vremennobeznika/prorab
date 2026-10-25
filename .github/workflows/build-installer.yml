@@ -1,0 +1,68 @@
+name: Build Prorab Windows installer
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-installer.yml'
+      - 'prorab-source.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Unpack published source archive
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath prorab-source.zip -DestinationPath unpacked -Force
+          $project = Get-ChildItem -Path unpacked -Recurse -Filter package.json -File |
+            Where-Object { $_.DirectoryName -notmatch '(node_modules|__MACOSX)' } |
+            Select-Object -First 1
+          if (!$project) { throw "No package.json in source archive" }
+          $path = $project.DirectoryName
+          echo "PRORAB_DIR=$path" >> $env:GITHUB_ENV
+          Write-Host "Source dir: $path"
+          if (!(Test-Path (Join-Path $path 'packaging/build-windows.ps1'))) {
+            throw "Windows builder missing from source archive"
+          }
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Test source
+        shell: pwsh
+        run: |
+          Set-Location $env:PRORAB_DIR
+          node --test
+          node qa/smoke-installed.mjs
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build installer
+        shell: powershell
+        run: |
+          Set-Location $env:PRORAB_DIR
+          .\packaging\build-windows.ps1
+      - name: Verify bundled runtime and installer
+        shell: pwsh
+        run: |
+          Set-Location $env:PRORAB_DIR
+          if (!(Test-Path 'build/runtime/node.exe')) { throw "Node runtime missing" }
+          if (!(Test-Path 'build/Прораб.exe')) { throw "Launcher missing" }
+          if (!(Test-Path 'dist/Prorab-Setup-0.3.0.exe')) { throw "Installer missing" }
+          $exe = Get-Item 'dist/Prorab-Setup-0.3.0.exe'
+          Write-Host "Installer: $($exe.Length) bytes"
+          Get-FileHash $exe.FullName -Algorithm SHA256
+      - name: Publish actual Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prorab-Windows-Setup
+          path: ${{ env.PRORAB_DIR }}/dist/Prorab-Setup-0.3.0.exe
+          if-no-files-found: error
+          retention-days: 30
