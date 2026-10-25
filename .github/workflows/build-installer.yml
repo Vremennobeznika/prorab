@@ -48,7 +48,11 @@ jobs:
         shell: pwsh
         run: |
           Set-Location $env:PRORAB_DIR
-          .\packaging\build-windows.ps1
+          $script = (Resolve-Path .\packaging\build-windows.ps1).Path
+          $source = Get-Content -LiteralPath $script -Raw -Encoding utf8
+          Set-Content -LiteralPath $script -Value $source -Encoding utf8BOM
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify bundled runtime and installer
         shell: pwsh
         run: |
