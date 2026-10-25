@@ -4,7 +4,7 @@
 
 ## Состояние публикации
 
-**Исходный код опубликован:** [скачать архив проекта](prorab-source.zip). Внутри 101 файла, в том числе `src/`, `web/`, тесты и `.github/workflows/windows-build.yml`. Проверена целостность ZIP и 93 автоматических теста на Linux.
+**Исходный код опубликован:** [скачать архив проекта](prorab-source.zip). Внутри 102 файла, в том числе `src/`, `web/`, тесты и `.github/workflows/windows-build.yml`. Проверена целостность ZIP и 94 автоматических теста на Linux.
 
 **Пробный Windows-установщик 0.3.4 собран:** [скачать артефакт Prorab-Windows-Setup](https://github.com/Vremennobeznika/prorab/actions/runs/40244625633). Внизу страницы сборки откройте Artifacts → Prorab-Windows-Setup, распакуйте ZIP и запустите Prorab-Setup-0.3.4.exe. Архив prorab-source.zip содержит исходники, а не установщик.
 
