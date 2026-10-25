@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/build-installer.yml'
       - 'prorab-source.zip'
+      - 'skills-bundle/**'
   workflow_dispatch:
 
 permissions:
@@ -31,6 +32,19 @@ jobs:
           if (!(Test-Path (Join-Path $path 'packaging/build-windows.ps1'))) {
             throw "Windows builder missing from source archive"
           }
+      - name: Bundle practical starter skills
+        shell: pwsh
+        run: |
+          $root = $env:PRORAB_DIR
+          Copy-Item -Path 'skills-bundle/agents/*' -Destination (Join-Path $root 'agents') -Recurse -Force
+          Copy-Item -Path 'skills-bundle/test/starter-skills.test.js' -Destination (Join-Path $root 'test/starter-skills.test.js') -Force
+          foreach ($rel in @('packaging/Prorab.iss','packaging/build-windows.ps1','package.json','web/app.js')) {
+            $file = Join-Path $root $rel
+            $source = Get-Content -LiteralPath $file -Raw -Encoding utf8
+            $source = $source -replace '0\\.3\\.[0-9]+','0.3.3'
+            [System.IO.File]::WriteAllText($file, $source, [System.Text.UTF8Encoding]::new($false))
+          }
+          Write-Host 'Installed 9 new skills, total expected: 11'
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:

@@ -1,0 +1,14 @@
+{
+  "name": "Порядок в заметках",
+  "description": "Сортирует заметки, создаёт чек-листы и планы. Пример: «Разбери идеи.txt по темам».",
+  "tools": [
+    "list_files",
+    "read_file",
+    "write_file",
+    "replace_in_file"
+  ],
+  "mode": "manual",
+  "maxSteps": 13,
+  "models": [],
+  "localOnly": false
+}
