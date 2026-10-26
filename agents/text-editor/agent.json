@@ -1,0 +1,16 @@
+{
+  "name": "Редактор текстов",
+  "description": "Исправляет стиль, орфографию и структуру текстовых файлов. Пример: «Улучши текст в заметка.md, сохранив смысл».",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "replace_in_file",
+    "write_file",
+    "update_plan"
+  ],
+  "mode": "manual",
+  "maxSteps": 12,
+  "models": [],
+  "localOnly": false
+}

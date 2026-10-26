@@ -1,0 +1,12 @@
+# Здесь лежат ваши секреты и рабочие данные — в git им не место
+.env
+data/
+certs/*.pem
+certs/*.crt
+certs/*.cer
+node_modules/
+
+credentials.json
+
+build/
+dist/

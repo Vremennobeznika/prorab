@@ -1,0 +1,17 @@
+{
+  "name": "prorab",
+  "version": "0.5.1",
+  "private": true,
+  "description": "Прораб — диспетчерская ИИ-агентов на бесплатных моделях",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "demo": "node scripts/demo.js",
+    "test": "node --test",
+    "gigachat-models": "node scripts/gigachat-models.js",
+    "browser-check": "node scripts/browser-check.mjs"
+  }
+}
