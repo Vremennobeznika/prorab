@@ -7,3 +7,6 @@ certs/*.cer
 node_modules/
 
 credentials.json
+
+build/
+dist/

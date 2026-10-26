@@ -20,6 +20,16 @@ else { throw 'Не найдена лицензия Node.js для включен
 foreach ($name in @('src','web','agents','config','certs')) {
   Copy-Item (Join-Path $root $name) (Join-Path $app $name) -Recurse -Force
 }
+# Official public CAs. Keep HTTPS verification enabled and fail the build on any error.
+# No system certificate store is modified; only the GigaChat adapter uses this bundle.
+$caDownload = Join-Path $build 'gigachat-ca'
+New-Item -ItemType Directory -Path $caDownload -Force | Out-Null
+$rootCa = Join-Path $caDownload 'root.crt'
+$subCa = Join-Path $caDownload 'sub.crt'
+Invoke-WebRequest 'https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt' -UseBasicParsing -TimeoutSec 60 -OutFile $rootCa
+Invoke-WebRequest 'https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt' -UseBasicParsing -TimeoutSec 60 -OutFile $subCa
+& $node (Join-Path $root 'scripts/prepare-gigachat-certs.mjs') $rootCa $subCa (Join-Path $app 'certs/russian_trusted_root_ca_pem.crt')
+if ($LASTEXITCODE -ne 0) { throw 'GigaChat CA validation failed' }
 # Pinned Microsoft SDK with checksum validation; the renderer runtime is signed by Microsoft.
 $desktop = Join-Path $build 'desktop'
 New-Item -ItemType Directory -Path $desktop -Force | Out-Null
@@ -55,4 +65,4 @@ $inno = @(
 if (-not $inno) { throw 'Требуется Inno Setup 6 для формирования установщика.' }
 & $inno (Join-Path $PSScriptRoot 'Prorab.iss')
 if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора завершилась с кодом $LASTEXITCODE" }
-Get-FileHash (Join-Path $dist 'Prorab-Setup-0.4.1.exe') -Algorithm SHA256
+Get-FileHash (Join-Path $dist 'Prorab-Setup-0.4.2.exe') -Algorithm SHA256

@@ -12,7 +12,7 @@ $installed = $false
 function Install-App {
   $process = Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR="' + $installDir + '"')) -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "Installer exit code: $($process.ExitCode)" }
-  foreach ($file in @('Прораб.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll','app/src/main.js','app/src/agent/memory.js','unins000.exe')) {
+  foreach ($file in @('Прораб.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll','app/src/main.js','app/src/agent/memory.js','app/certs/russian_trusted_root_ca_pem.crt','unins000.exe')) {
     if (!(Test-Path (Join-Path $installDir $file))) { throw "Installed file missing: $file" }
   }
 }
@@ -57,6 +57,8 @@ function Stop-OwnedProcess($process) {
 try {
   Install-App
   $installed = $true
+  & (Join-Path $installDir 'runtime/node.exe') (Join-Path $PSScriptRoot 'gigachat-tls.mjs') (Join-Path $installDir 'app')
+  if ($LASTEXITCODE -ne 0) { throw 'Installed GigaChat TLS verification failed' }
   $running = Start-PackagedApp
   $nodeProcess = $running.process
   $api = Connect-App $running.ready

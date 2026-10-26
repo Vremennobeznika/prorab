@@ -18,6 +18,8 @@ import { ROOT } from '../../util/paths.js';
 
 const DEFAULT_TIMEOUT_SEC = 120;
 const TOKEN_LIFETIME_MS = 25 * 60_000; // токен живёт 30 минут; обновляем с запасом
+const PACKAGED_CA = path.join(ROOT, 'certs', 'russian_trusted_root_ca_pem.crt');
+const GIGACHAT_HOSTS = new Set(['api.giga.chat', 'gigachat.devices.sberbank.ru', 'ngw.devices.sberbank.ru']);
 
 export function createGigaChatProvider(config, env = process.env) {
   const authKeyEnv = config.authKeyEnv ?? 'GIGACHAT_AUTH_KEY';
@@ -29,14 +31,19 @@ export function createGigaChatProvider(config, env = process.env) {
   let token = null; // { value, refreshAtMs }
   let trusted = null; // список доверенных сертификатов (читаем файл один раз)
 
-  function trustedCerts() {
+  function trustedCerts(hostname) {
     if (!trusted) {
       // Node 22.16+: доверенные центры из Windows + системный/встроенный набор Node.
       // Если пользователь добавил сертификат вручную, учитываем и его.
       trusted = typeof tls.getCACertificates === 'function'
-        ? [...tls.getCACertificates('bundled'), ...tls.getCACertificates('system')]
+        ? [...tls.getCACertificates('bundled'), ...tls.getCACertificates('system'), ...tls.getCACertificates('extra')]
         : [...tls.rootCertificates];
       if (caPath && fs.existsSync(caPath)) trusted.push(fs.readFileSync(caPath, 'utf8'));
+    }
+    // Old profiles retain their settings after an update. The packaged fallback works
+    // even if caFile was removed/changed; it is trusted only for official GigaChat hosts.
+    if (GIGACHAT_HOSTS.has(hostname) && caPath !== PACKAGED_CA && fs.existsSync(PACKAGED_CA)) {
+      return [...trusted, fs.readFileSync(PACKAGED_CA, 'utf8')];
     }
     return trusted;
   }
@@ -85,7 +92,8 @@ export function createGigaChatProvider(config, env = process.env) {
           path: url.pathname + url.search,
           method,
           headers,
-          ca: trustedCerts(),
+          ca: trustedCerts(url.hostname),
+          rejectUnauthorized: true,
           signal,
           timeout: timeoutMs,
         },
@@ -223,10 +231,10 @@ function parseJson(text) {
 
 /** Превращает сетевую ошибку в понятное объяснение. */
 function explainNetworkError(err, timeoutMs) {
-  const certProblems = ['SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_UNTRUSTED', 'DEPTH_ZERO_SELF_SIGNED_CERT'];
+  const certProblems = ['SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_UNTRUSTED', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'ERR_TLS_CERT_ALTNAME_INVALID'];
   if (certProblems.includes(err.code)) {
     return new ProviderError(
-      'сертификат GigaChat не принят: проверьте файл сертификата Минцифры в папке certs/ (формат PEM; возможно, нужен и «выпускающий» сертификат) — см. certs/README.txt',
+      'Не удалось проверить защищённое соединение с GigaChat. Обновите Прораб до версии 0.4.2 или новее: сертификаты входят в установщик. Если ошибка остаётся, проверьте дату и время Windows и HTTPS-проверку антивируса или прокси. Ключ менять не нужно.',
       { kind: 'auth' },
     );
   }
