@@ -93,17 +93,18 @@ export function createServer({ app, webDir, token, lan = false }) {
       if (req.method === 'GET' && !sessionMatch[2]) return sendJson(res, 200, app.sessions.visible(session));
       if (isPost && sessionMatch[2]) {
         const body = await readJsonBody(req);
-        const runId = app.startRun(session.agentId, body.task, { sessionId: session.id, useMemory: body.useMemory ?? false, criteria: body.criteria ?? '' });
+        const runId = app.startRun(session.agentId, body.task, { sessionId: session.id, useMemory: body.useMemory ?? false, criteria: body.criteria ?? '', learnMemory: body.learnMemory ?? false, verifyResult: body.verifyResult ?? false });
         return sendJson(res, 201, { runId });
       }
     }
 
     if (req.method === 'GET' && pathname === '/api/memory') {
-      return sendJson(res, 200, { notes: app.memory.list((url.searchParams.get('q') || '').slice(0, 4000)) });
+      return sendJson(res, 200, { notes: app.memory.listWithConflicts((url.searchParams.get('q') || '').slice(0, 4000)) });
     }
     if (isPost && pathname === '/api/memory') {
       return sendJson(res, 200, app.saveMemory(await readJsonBody(req)));
     }
+    if (isPost && pathname === '/api/memory/resolve') return sendJson(res, 200, app.resolveMemory(await readJsonBody(req)));
     if (isPost && pathname === '/api/memory/delete') {
       const body = await readJsonBody(req);
       return sendJson(res, 200, app.memory.remove(body.id));
@@ -114,7 +115,7 @@ export function createServer({ app, webDir, token, lan = false }) {
 
     if (isPost && pathname === '/api/runs') {
       const body = await readJsonBody(req);
-      const runId = app.startRun(String(body.agentId ?? ''), body.task, { useMemory: body.useMemory ?? false, criteria: body.criteria ?? '' });
+      const runId = app.startRun(String(body.agentId ?? ''), body.task, { useMemory: body.useMemory ?? false, criteria: body.criteria ?? '', learnMemory: body.learnMemory ?? false, verifyResult: body.verifyResult ?? false });
       return sendJson(res, 201, { runId });
     }
 

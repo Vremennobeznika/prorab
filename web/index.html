@@ -70,6 +70,9 @@
           <details class="composer-options"><summary>Память и критерии готовности</summary>
             <label>Критерии готовности (необязательно)<textarea id="criteria" rows="3" maxlength="2000" placeholder="Например: отчёт содержит итоги по месяцам; исходные файлы не изменены"></textarea></label>
           <label class="check-label"><input id="use-memory" type="checkbox"> Использовать память и прошлые задания</label>
+          <label class="check-label"><input id="learn-memory" type="checkbox"> Предлагать, что запомнить после ответа</label>
+          <label class="check-label"><input id="verify-result" type="checkbox"> Отдельная проверка результата специалистом</label>
+          <p class="hint">Предложения и проверка используют дополнительные запросы к выбранной модели. Предложения сохраняются для этого проекта и применяются только после вашего подтверждения. Специалист может читать файлы проекта; менять их и запускать команды он не может. Его оценка тоже может ошибаться.</p>
           <p class="hint">При включении подходящие заметки и прошлые задания этого агента передаются выбранной модели. Это задание тоже станет доступно для следующих запусков с памятью.</p>
           </details>
           <button class="btn" type="submit" data-t="form.start"></button>
@@ -105,8 +108,12 @@
       </section>
       <section id="tab-memory" hidden>
         <h2>Память помощников</h2>
-        <p class="hint">Сохраняйте предпочтения и решения явно. Помощник подбирает записи по словам задания, если на пульте включена память. Прошлый ответ может содержать ошибки. Не сохраняйте здесь пароли и ключи.</p>
+        <p class="hint">Сохраняйте предпочтения и решения явно. Помощник подбирает записи с учётом слов, их форм и небольшого словаря синонимов, если на пульте включена память. Прошлый ответ может содержать ошибки. Не сохраняйте здесь пароли и ключи.</p>
         <form id="memory-form" class="card">
+          <label>Область заметки<select id="memory-scope"></select></label>
+          <label>Тип<select id="memory-kind"><option value="fact">Факт</option><option value="preference">Предпочтение</option><option value="decision">Решение</option><option value="constraint">Ограничение</option></select></label>
+          <label>Тема (для выявления противоречий)<input id="memory-topic" maxlength="100" placeholder="Например: версия Node.js"></label>
+          <label>Папка ограничения (необязательно)<input id="memory-path" maxlength="200" placeholder="Например: src или docs"></label>
           <label>Что запомнить<textarea id="memory-text" maxlength="2000" rows="3" required></textarea></label>
           <label class="check-label"><input id="memory-pinned" type="checkbox" checked> Учитывать во всех заданиях с памятью (например, предпочтение)</label>
           <label class="check-label"><input id="memory-local" type="checkbox" checked> Только для агентов с режимом «Только локальные модели»</label>
@@ -119,6 +126,8 @@
           <label>Поиск в заметках и завершённых заданиях<input id="memory-query" type="search" maxlength="4000" placeholder="Например: отчёт продажи"></label>
           <button class="btn" type="submit">Найти</button>
         </form>
+        <h2>Предложения — требуют подтверждения</h2><div id="memory-suggestions" class="list"></div>
+        <label class="check-label"><input id="memory-retired" type="checkbox"> Показать архивные и отклонённые записи для удаления</label>
         <h2>Заметки</h2><div id="memory-notes" class="list"></div>
         <h2>Прошлые задания</h2><div id="memory-history" class="list"><p class="hint">Введите слова для поиска.</p></div>
       </section>

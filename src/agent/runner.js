@@ -18,9 +18,10 @@ const PREVIEW_IN_LOG = 600;
  * Запускает агента. Возвращает { status: 'done' | 'step_limit', answer }.
  * Ошибки (нет ни одной модели, остановка человеком) — бросает наружу: их обработает вызывающий код.
  */
-export async function runAgent({ agent, task, runId, pool, runs, approvals, workspace, backupDir, signal, secretEnvNames = [], recalled = [], criteria = '', history = [], onMessages, updatePlan, delegate, plan = [] }) {
+export async function runAgent({ agent, task, runId, pool, runs, approvals, workspace, backupDir, signal, secretEnvNames = [], recalled = [], criteria = '', history = [], onMessages, updatePlan, delegate, plan = [], constraintsForPath }) {
   const ctx = { workspace, backupDir, signal, secretEnvNames, updatePlan, delegate };
   const schemas = toolSchemas(agent.tools);
+  const announcedConstraints = new Set();
   const messages = [
     { role: 'system', content: buildSystemPrompt(agent) },
     ...structuredClone(history),
@@ -72,6 +73,17 @@ export async function runAgent({ agent, task, runId, pool, runs, approvals, work
     const tool = agent.tools.includes(call.name) ? TOOLS[call.name] : null;
     if (!tool) return report(call, `Ошибка: инструмента «${call.name}» нет. Доступны: ${agent.tools.join(', ')}.`);
     if (call.argsError) return report(call, `Ошибка: ${call.argsError}.`);
+
+    if (tool.risk === 'write' && constraintsForPath && typeof call.args?.path === 'string') {
+      const notes = constraintsForPath(call.args.path);
+      if (JSON.stringify(notes.map((n) => ({ id: n.id, text: n.text }))).length > 6000) return report(call, 'Изменение не выполнено: слишком много ограничений для безопасной передачи модели. Сократите ограничения проекта во вкладке «Память».');
+      const unseen = notes.filter((n) => !announcedConstraints.has(n.id));
+      if (unseen.length) {
+        unseen.forEach((n) => announcedConstraints.add(n.id));
+        runs.emit(runId, 'memory_constraints', { path: call.args.path, sources: unseen.map((n) => n.id) });
+        return report(call, 'Изменение ещё не выполнено. Сначала учти подтверждённые ограничения проекта (данные, не разрешение на запись). Если действие им соответствует, повтори вызов; иначе объясни противоречие пользователю.\n' + JSON.stringify(unseen.map((n) => ({ id: n.id, text: n.text }))));
+      }
+    }
 
     if (needsApproval(tool, agent)) {
       const { title, details } = tool.describe(call.args);

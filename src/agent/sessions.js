@@ -78,7 +78,7 @@ export function createSessions({ dir, workspace }) {
     turn.status = status; turn.answer = answer; session.activeRunId = null;
     session.updatedAt = new Date().toISOString(); persist(session); sessions.set(id, session);
   }
-  function context(id) {
+  function context(id, { includeSummary = false } = {}) {
     const turns = get(id).turns.filter((t) => t.status !== 'running');
     const result = []; let size = 0, kept = 0, summarizedTurns = 0;
     for (const turn of turns.slice(-8).reverse()) {
@@ -91,11 +91,23 @@ export function createSessions({ dir, workspace }) {
         summarized = true;
       }
       const bytes = JSON.stringify(group).length;
-      if (size + bytes > 48000) break;
+      if (size + bytes > (includeSummary ? 43200 : 48000)) break;
       result.unshift(...group); size += bytes; kept += 1;
       if (summarized) summarizedTurns += 1;
     }
-    return { messages: result, omittedTurns: turns.length - kept, summarizedTurns };
+    const omitted = turns.slice(0, turns.length - kept);
+    let summary = '';
+    if (includeSummary && omitted.length) {
+      // Extractive digest: retain original excerpts and run IDs, never promote them to facts.
+      const entries = omitted.map((t) => ({ runId: t.runId, status: t.status, task: t.task.slice(0, 160),
+        criteria: (t.criteria || '').slice(0, 160), answer: (t.answer || '').slice(0, 280) }));
+      const important = entries.filter((e) => /решен|огранич|запомни|предпоч|не менять|не заверш|не провер/i.test(e.task + ' ' + e.answer));
+      const chosen = [...new Map([...important.slice(-5), ...entries.slice(-4)].map((e) => [e.runId, e])).values()];
+      summary = 'Сводка прежних шагов — выдержки, не проверенные факты. Исходный журнал сохранён.\n' + JSON.stringify(chosen);
+      summary = summary.slice(0, 4800);
+      result.unshift({ role: 'user', content: summary });
+    }
+    return { messages: result, omittedTurns: turns.length - kept, summarizedTurns, summary };
   }
   function updatePlan(id, steps) {
     if (!Array.isArray(steps) || steps.length > 12 || steps.some((s) => !s || typeof s.text !== 'string' || !s.text.trim() || s.text.length > 300 || !['pending', 'in_progress', 'done'].includes(s.status))) throw new UserError('План: до 12 пунктов со статусами pending, in_progress, done.');

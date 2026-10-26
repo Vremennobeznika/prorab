@@ -12,7 +12,7 @@ $installed = $false
 function Install-App {
   $process = Start-Process -FilePath $Installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR="' + $installDir + '"')) -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "Installer exit code: $($process.ExitCode)" }
-  foreach ($file in @('Прораб.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll','app/src/main.js','app/src/agent/memory.js','app/certs/russian_trusted_root_ca_pem.crt','unins000.exe')) {
+  foreach ($file in @('Прораб.exe','runtime/node.exe','runtime/NODE-LICENSE.txt','Microsoft.Web.WebView2.Core.dll','WebView2Loader.dll','app/src/main.js','app/src/agent/memory.js','app/certs/russian_trusted_root_ca_pem.crt','app/ORIGINS.md','app/THIRD_PARTY_NOTICES.md','app/src/agent/learning.js','unins000.exe')) {
     if (!(Test-Path (Join-Path $installDir $file))) { throw "Installed file missing: $file" }
   }
 }
@@ -62,7 +62,7 @@ try {
   $running = Start-PackagedApp
   $nodeProcess = $running.process
   $api = Connect-App $running.ready
-  $note = Invoke-RestMethod -Uri ($api.origin + '/api/memory') -WebSession $api.session -Method Post -ContentType 'application/json; charset=utf-8' -Body (@{text='Windows smoke: remember this';localOnly=$true;pinned=$true} | ConvertTo-Json) -TimeoutSec 10
+  $note = Invoke-RestMethod -Uri ($api.origin + '/api/memory') -WebSession $api.session -Method Post -ContentType 'application/json; charset=utf-8' -Body (@{text='Windows smoke: remember this';localOnly=$true;pinned=$true;kind='decision';topic='Windows smoke'} | ConvertTo-Json) -TimeoutSec 10
   $marker = Join-Path $profile 'workspace/проверка.txt'
   Set-Content -LiteralPath $marker -Value 'keep after uninstall' -Encoding utf8
   Stop-OwnedProcess $nodeProcess
@@ -73,6 +73,8 @@ try {
   $api = Connect-App $running.ready
   $memory = Invoke-RestMethod -Uri ($api.origin + '/api/memory') -WebSession $api.session -TimeoutSec 10
   if (!(@($memory.notes.id) -contains $note.id)) { throw 'Memory did not survive application restart' }
+  $restored = $memory.notes | Where-Object { $_.id -eq $note.id } | Select-Object -First 1
+  if ($restored.kind -ne 'decision' -or $restored.topic -ne 'Windows smoke' -or $restored.status -ne 'accepted') { throw 'Memory metadata lost after restart' }
   Stop-OwnedProcess $nodeProcess
   $nodeProcess = $null
 

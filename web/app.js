@@ -9,7 +9,7 @@
 
   // ───────── 1. Тексты интерфейса: всё по-русски и в одном месте ─────────
   const T = {
-    app: { footer: 'Прораб, версия 0.4.2' },
+    app: { footer: 'Прораб, версия 0.5.0' },
     top: {
       stopAll: 'Остановить',
       stopAllConfirm: 'Остановить все запущенные задачи?',
@@ -368,6 +368,11 @@
       case 'delegate_started': return { title: `Проверяет: ${event.agent}`, body: event.task, kind: 'tool' };
       case 'delegate_finished': return { title: 'Проверка специалиста: ' + (T.status[event.status] || event.status), kind: 'tool' };
       case 'memory_recalled': return { title: 'Память: подобрано записей — ' + event.sources.length, body: event.sources.map((s) => `${s.kind === 'note' ? 'Заметка' : 'Запуск'}: ${s.id}`).join('\n'), kind: 'step' };
+      case 'memory_suggested': return { title: 'Предложения памяти: ' + event.ids.length, body: 'Просмотрите их на вкладке «Память». Пока вы их не приняли, они не используются.', kind: 'step' };
+      case 'memory_constraints': return { title: 'Ограничения перед изменением файла', body: event.path + '\n' + event.sources.join(', '), kind: 'step' };
+      case 'result_review': return { title: 'Отдельная проверка результата', body: event.text, kind: 'step' };
+      case 'review_unavailable': return { title: 'Проверка не выполнена', body: event.message, kind: 'err' };
+      case 'memory_learning_unavailable': return { title: 'Предложения памяти недоступны', body: event.message, kind: 'err' };
       case 'memory_unavailable': return { title: 'Память недоступна, задание выполняется без неё', body: event.message, kind: 'err' };
       case 'step': return { title: fill(E.step, event), kind: 'step' };
       case 'model_reply': {
@@ -492,6 +497,12 @@
 
   function editMemory(note) {
     editingNote = note;
+    const scope = $('#memory-scope');
+    scope.replaceChildren(h('option', { value: '' }, 'Все проекты'), ...state.projects.map((p) => h('option', { value: p.path }, p.name)));
+    scope.value = note ? note.workspacePath || '' : state.projects.find((p) => p.id === selectedProjectId)?.path || '';
+    $('#memory-kind').value = note?.kind || 'fact';
+    $('#memory-topic').value = note?.topic || '';
+    $('#memory-path').value = note?.pathPrefix || '';
     $('#memory-text').value = note?.text || '';
     $('#memory-pinned').checked = note?.pinned ?? true;
     $('#memory-local').checked = note?.localOnly ?? true;
@@ -502,6 +513,7 @@
   }
 
   async function loadMemory() {
+    if (!state) return;
     const request = ++memoryRequest;
     const query = $('#memory-query').value.trim();
     try {
@@ -510,9 +522,27 @@
         query ? api('/api/history/search?q=' + encodeURIComponent(query)) : Promise.resolve({ runs: [] }),
       ]);
       if (request !== memoryRequest) return;
-      $('#memory-notes').replaceChildren(...(data.notes.length ? data.notes.map((note) =>
+      if (!$('#memory-scope').options.length) {
+        $('#memory-scope').replaceChildren(h('option', { value: '' }, 'Все проекты'), ...state.projects.map((p) => h('option', { value: p.path }, p.name)));
+        $('#memory-scope').value = state.projects.find((p) => p.id === selectedProjectId)?.path || '';
+      }
+      const pending = data.notes.filter((n) => n.status === 'pending');
+      $('#memory-suggestions').replaceChildren(...(pending.length ? pending.map((note) => h('article', { class: 'card memory-note' },
+        h('p', null, note.text), h('p', { class: 'meta' }, 'Проект: ' + (state.projects.find((p) => p.path === note.workspacePath)?.name || note.workspacePath || 'Все проекты')),
+        h('p', { class: 'hint' }, 'Цитата источника: ' + (note.evidence || 'см. журнал')),
+        h('p', { class: 'meta' }, 'Источник: ' + note.sourceRunId),
+        note.conflictsWith?.length ? h('p', { class: 'error' }, 'Есть другая запись на эту тему. Можно сохранить обе или явно заменить прежнюю.') : null,
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn', type: 'button', onclick: () => resolveMemory(note.id, 'accept') }, 'Принять'),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => editMemory(note) }, 'Изменить перед сохранением'),
+          ...(note.conflictsWith || []).map((id) => h('button', { class: 'btn ghost', type: 'button', onclick: () => resolveMemory(note.id, 'accept', id) }, 'Заменить: ' + clip(data.notes.find((n) => n.id === id)?.text || id, 70))),
+          h('button', { class: 'btn ghost', type: 'button', onclick: () => resolveMemory(note.id, 'reject') }, 'Отклонить')))) : [h('p', { class: 'hint' }, 'Новых предложений нет.')]));
+      const notes = data.notes.filter((n) => n.status !== 'pending' && ($('#memory-retired').checked || !['archived', 'rejected'].includes(n.status)));
+      $('#memory-notes').replaceChildren(...(notes.length ? notes.map((note) =>
         h('article', { class: 'card memory-note' },
           h('p', null, note.text),
+          h('p', { class: 'meta' }, 'Проект: ' + (state.projects.find((p) => p.path === note.workspacePath)?.name || note.workspacePath || 'Все проекты') + (['archived', 'rejected'].includes(note.status) ? ' · Архив' : '')),
+          note.conflictsWith?.length ? h('p', { class: 'error' }, 'Возможное противоречие: другая запись на тему «' + note.topic + '».') : null,
           h('p', { class: 'meta' }, (note.pinned ? 'Во всех заданиях · ' : 'По совпадению слов · ') + (note.localOnly ? 'Только локальные агенты' : 'Можно передавать облачной модели') + ' · ' + formatDateTime(note.updatedAt)),
           note.sourceRunId ? h('p', { class: 'meta' }, 'Источник: ' + note.sourceRunId) : null,
           h('div', { class: 'btn-row' },
@@ -531,6 +561,14 @@
     } catch (err) { if (request === memoryRequest) $('#memory-result').textContent = err.message; }
   }
 
+  async function resolveMemory(id, action, replaceId) {
+    try {
+      await api('/api/memory/resolve', { method: 'POST', body: { id, action, replaceId } });
+      $('#memory-result').textContent = action === 'accept' ? 'Предложение принято. Оно доступно только в выбранной области и с указанными ограничениями.' : 'Предложение отклонено и не используется.';
+      await loadMemory();
+    } catch (err) { $('#memory-result').textContent = err.message; }
+  }
+
   async function saveMemory(event) {
     event.preventDefault();
     const button = event.currentTarget.querySelector('button[type="submit"]');
@@ -538,6 +576,7 @@
     try {
       await api('/api/memory', { method: 'POST', body: {
         ...(editingNote?.id ? { id: editingNote.id } : {}),
+        workspacePath: $('#memory-scope').value || null, kind: $('#memory-kind').value, topic: $('#memory-topic').value.trim(), pathPrefix: $('#memory-path').value.trim(),
         text: $('#memory-text').value, pinned: $('#memory-pinned').checked, localOnly: $('#memory-local').checked,
         sourceRunId: editingNote?.sourceRunId || null,
       } });
@@ -588,7 +627,7 @@
         const session = await api('/api/sessions', { method: 'POST', body: { agentId, projectId: selectedProjectId, providerId: $('#model-select').value || null } });
         selectedSessionId = session.id; selectedSession = session; saveSetting('session', session.id);
       }
-      const { runId } = await api(`/api/sessions/${encodeURIComponent(selectedSessionId)}/messages`, { method: 'POST', body: { task, useMemory: $('#use-memory').checked, criteria: $('#criteria').value.trim() } });
+      const { runId } = await api(`/api/sessions/${encodeURIComponent(selectedSessionId)}/messages`, { method: 'POST', body: { task, useMemory: $('#use-memory').checked, learnMemory: $('#use-memory').checked && $('#learn-memory').checked, verifyResult: $('#verify-result').checked, criteria: $('#criteria').value.trim() } });
       saveSetting('agent', agentId);
       saveSetting('use-memory', String($('#use-memory').checked));
       $('#task').value = '';
@@ -678,6 +717,7 @@
     }
     $('#memory-form').addEventListener('submit', saveMemory);
     $('#memory-cancel').addEventListener('click', () => editMemory(null));
+    $('#memory-retired').addEventListener('change', loadMemory);
     $('#memory-search').addEventListener('submit', (event) => { event.preventDefault(); loadMemory(); });
     $('#use-memory').checked = readSetting('use-memory') === 'true';
     $('#run-form').addEventListener('submit', startRun);
@@ -691,6 +731,7 @@
     showTab(readSetting('tab') || 'control');
 
     refresh().then(() => {
+      if (!$('#tab-memory').hidden) loadMemory();
       // После перезагрузки страницы сразу показываем запуск, который ещё идёт.
       const active = state && state.runs.find((r) => r.status === 'running');
       if (active && !selectedRunId) openRun(active.id);

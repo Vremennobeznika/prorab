@@ -71,12 +71,14 @@ export const TOOLS = {
     description: 'Найти точный текст в локальных файлах. Возвращает пути, номера строк и фрагменты без пересказа. Без регулярных выражений; поиск без учёта регистра. Скрытые файлы, ключи, зависимости и символьные ссылки пропускаются.',
     parameters: { type: 'object', properties: {
       query: { type: 'string', description: 'Текст для поиска (1–200 символов), например имя функции.' },
+      mode: { type: 'string', enum: ['text', 'symbols'], description: 'symbols: искать только строки объявлений функций, классов и переменных (эвристика, не полный парсер).' },
       path: { type: 'string', description: 'Подпапка рабочей папки. По умолчанию вся рабочая папка.' },
     }, required: ['query'] },
     describe: (a) => ({ title: `Найти «${a?.query ?? ''}» в файлах`, details: a?.path || '.' }),
     async run(a, ctx) {
       const query = text(a, 'query').trim();
       if (!query || query.length > 200) throw new Error('Для поиска нужно от 1 до 200 символов.');
+      if (a?.mode !== undefined && !['text', 'symbols'].includes(a.mode)) throw new Error('Неизвестный режим поиска.');
       const start = resolveInside(ctx.workspace, a?.path || '.');
       if (!fs.statSync(start).isDirectory()) throw new Error('Укажите папку для поиска.');
       const ignored = new Set(['node_modules', 'vendor', 'build', 'dist', 'data', 'certs', '__pycache__', 'venv']);
@@ -112,6 +114,7 @@ export const TOOLS = {
           } catch { skipped += 1; continue; }
           const lines = contents.split('\n');
           for (let line = 0; line < lines.length; line++) {
+            if (a?.mode === 'symbols' && !/(?:^|\s)(?:function|class|def|fn|struct|interface|type|const|let|var)\s+[\p{L}_$][\p{L}\p{N}_$]*/u.test(lines[line])) continue;
             const position = lines[line].toLowerCase().indexOf(query.toLowerCase());
             if (position < 0) continue;
             const from = Math.max(0, position - 100);
@@ -123,7 +126,7 @@ export const TOOLS = {
         }
       }
       return JSON.stringify({ hits, scannedFiles: files, skipped, limited,
-        note: limited ? 'Достигнут лимит поиска. Уточните подпапку или запрос.' : 'Точный поиск текста, не поиск по смыслу.' });
+        note: limited ? 'Достигнут лимит поиска. Уточните подпапку или запрос.' : (a?.mode === 'symbols' ? 'Поиск строк объявлений по эвристике; это не полный синтаксический анализ.' : 'Точный поиск текста, не поиск по смыслу.') });
     },
   },
 

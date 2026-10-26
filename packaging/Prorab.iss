@@ -1,5 +1,5 @@
 #define MyAppName "Прораб"
-#define MyAppVersion "0.4.2"
+#define MyAppVersion "0.5.0"
 [Setup]
 AppId={{60BF5C40-1868-4E48-927C-16717E132BE8}
 AppName={#MyAppName}
@@ -7,7 +7,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Prorab
 DefaultGroupName={#MyAppName}
 OutputDir=..\dist
-OutputBaseFilename=Prorab-Setup-0.4.2
+OutputBaseFilename=Prorab-Setup-0.5.0
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=lowest

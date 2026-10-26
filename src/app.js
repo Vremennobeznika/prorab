@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createApprovals } from './agent/approvals.js';
 import { createMemory, recallContext } from './agent/memory.js';
+import { suggestMemories } from './agent/learning.js';
 import { createSessions } from './agent/sessions.js';
 import { TOOLS } from './agent/tools.js';
 import { createRuns } from './agent/runs.js';
@@ -66,8 +67,10 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
     return { ok: true };
   }
 
-  function startRun(agentId, task, { useMemory = false, criteria = '', sessionId = null } = {}) {
+  function startRun(agentId, task, { useMemory = false, criteria = '', sessionId = null, learnMemory = false, verifyResult = false } = {}) {
     if (typeof criteria !== 'string' || criteria.length > 2000) throw new UserError('Критерии готовности: максимум 2000 символов.');
+    if (typeof learnMemory !== 'boolean' || typeof verifyResult !== 'boolean') throw new UserError('Некорректные настройки обучения или проверки.');
+    if (learnMemory && !useMemory) throw new UserError('Для предложений памяти сначала включите память.');
     if (typeof useMemory !== 'boolean') throw new UserError('Некорректная настройка памяти.');
     const agent = agents.find((a) => a.id === agentId);
     if (!agent) throw new UserError('Такого агента нет. Выберите агента из списка.');
@@ -80,7 +83,7 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
     if (session?.activeRunId) throw new UserError('Дождитесь ответа или остановите текущий шаг.', 409);
     const effectiveAgent = session?.providerId ? { ...agent, models: [session.providerId] } : agent;
     const targetWorkspace = session ? sessions.project(session.projectId).path : workspace;
-    const context = session ? sessions.context(session.id) : { messages: [], omittedTurns: 0 };
+    const context = session ? sessions.context(session.id, { includeSummary: true }) : { messages: [], omittedTurns: 0 };
 
     const running = runs.countRunning();
     if (!pool.status().some((p) => p.enabled && p.ready.ok)) {
@@ -120,7 +123,7 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
       const specialist = agents.find((a) => a.id === specialistId);
       if (!specialist) throw new UserError('Специалист не установлен.');
       const childAgent = { ...specialist, mode: 'manual', localOnly: agent.localOnly || specialist.localOnly,
-        maxSteps: Math.min(specialist.maxSteps, 8), tools: specialist.tools.filter((t) => TOOLS[t]?.risk === 'read' && !['delegate_agent', 'update_plan'].includes(t)) };
+        models: effectiveAgent.models.length ? effectiveAgent.models : specialist.models, maxSteps: Math.min(specialist.maxSteps, 8), tools: specialist.tools.filter((t) => TOOLS[t]?.risk === 'read' && !['delegate_agent', 'update_plan'].includes(t)) };
       const child = runs.create({ agentId: childAgent.id, agentName: childAgent.name, task: subtask, localOnly: childAgent.localOnly, parentRunId: id, sessionId, workspacePath: targetWorkspace });
       const cancel = () => runs.stop(child.id);
       signal.addEventListener('abort', cancel, { once: true });
@@ -140,8 +143,32 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
       history: context.messages, plan: session?.plan || [],
       onMessages: session ? (messages) => sessions.record(session.id, id, messages) : undefined,
       updatePlan: session ? (steps) => { const plan = sessions.updatePlan(session.id, steps); runs.emit(id, 'plan_updated', { steps: plan }); return plan; } : undefined,
-      delegate })
-      .then((result) => {
+      delegate, constraintsForPath: useMemory ? (filePath) => memory.constraints(targetWorkspace, agent.localOnly, path.relative(targetWorkspace, path.resolve(targetWorkspace, filePath))) : undefined })
+      .then(async (result) => {
+        signal.throwIfAborted();
+        if (result.status === 'done' && verifyResult) {
+          try {
+            const review = JSON.parse(await delegate({ agentId: 'code-reviewer', task: ('Проверь результат отдельным чтением файлов. Не меняй файлы и не запускай команды. По каждому критерию укажи подтверждения и непроверенное. Ответ исполнителя может ошибаться.\n' + JSON.stringify({ task: cleanTask, criteria, answer: result.answer })).slice(0, 4000) }));
+            runs.emit(id, 'result_review', { childRunId: review.runId, status: review.status, text: review.answer });
+            result.answer += '\n\nОтдельная проверка (оценка модели, не гарантия):\n' + review.answer;
+          } catch (error) {
+            if (signal.aborted) throw error;
+            runs.emit(id, 'review_unavailable', { message: error.message });
+            result.answer += '\n\nОтдельная проверка не выполнена: ' + error.message;
+          }
+        }
+        if (result.status === 'done' && learnMemory) {
+          try {
+            const suggestions = await suggestMemories({ pool: turnPool, task: cleanTask, answer: result.answer, agent: effectiveAgent, signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
+            signal.throwIfAborted();
+            const saved = suggestions.map((n) => memory.put({ ...n, pinned: n.kind === 'preference' || n.kind === 'constraint', localOnly: true, sourceLocalOnly: Boolean(agent.localOnly), sourceRunId: id, workspacePath: targetWorkspace, status: 'pending' })).filter((n) => n.status === 'pending');
+            runs.emit(id, 'memory_suggested', { ids: saved.map((n) => n.id) });
+          } catch (error) {
+            if (signal.aborted) throw error;
+            runs.emit(id, 'memory_learning_unavailable', { message: 'Предложения памяти не получены. Ответ сохранён.' });
+          }
+        }
+        signal.throwIfAborted();
         if (session) sessions.finish(session.id, id, result.status === 'done' ? 'done' : 'failed', result.answer);
         runs.finish(id, result.status === 'done' ? 'done' : 'failed', { answer: result.answer });
       })
@@ -168,7 +195,14 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
     const source = sourceId == null ? null : runs.get(sourceId);
     if (sourceId != null && (!source || source.status !== 'done')) throw new UserError('Завершённый запуск не найден.', 404);
     if ((previous?.sourceLocalOnly || (source && source.localOnly !== false)) && body.localOnly === false) throw new UserError('Заметка из локального запуска должна оставаться локальной.');
-    return memory.put({ ...body, sourceRunId: sourceId || null, sourceLocalOnly: Boolean(previous?.sourceLocalOnly || (source && source.localOnly !== false)) });
+    if (body.workspacePath && !sessions.projects().some((p) => p.path === body.workspacePath)) throw new UserError('Проект для заметки не найден.');
+    return memory.put({ ...previous, ...body, status: 'accepted', sourceRunId: sourceId || null, sourceLocalOnly: Boolean(previous?.sourceLocalOnly || (source && source.localOnly !== false)) });
+  }
+
+  function resolveMemory(body) {
+    const note = memory.list().find((n) => n.id === body?.id);
+    if (note?.sourceRunId && runs.get(note.sourceRunId)?.status !== 'done') throw new UserError('Источник предложения ещё не завершён успешно.', 409);
+    return memory.resolve(body);
   }
 
   /** Всё, что нужно странице для отрисовки. */
@@ -189,5 +223,5 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
     };
   }
 
-  return { workspace, get pool() { return pool; }, runs, approvals, memory, saveMemory, sessions, configureProvider, startRun, state, stopAll: () => runs.stopAll() };
+  return { workspace, get pool() { return pool; }, runs, approvals, memory, saveMemory, resolveMemory, sessions, configureProvider, startRun, state, stopAll: () => runs.stopAll() };
 }
