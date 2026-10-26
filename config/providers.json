@@ -1,0 +1,42 @@
+{
+  "примечание": "Реестр моделей. Агент идёт по провайдерам сверху вниз; если один недоступен или упёрся в лимит — берётся следующий. enabled: true включает провайдера. Ключи хранятся не здесь, а в файле .env.",
+  "providers": [
+    {
+      "id": "local",
+      "title": "Локальная модель (Ollama)",
+      "type": "openai",
+      "enabled": false,
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "model": "llama3.2",
+      "timeoutSec": 300,
+      "privacy": "local",
+      "note": "Нужна отдельно установленная программа Ollama и скачанная модель. Если не знаете, что это, выберите облачную модель."
+    },
+    {
+      "id": "gigachat",
+      "title": "GigaChat (Сбер), Freemium",
+      "type": "gigachat",
+      "enabled": false,
+      "baseUrl": "https://api.giga.chat/v1",
+      "oauthUrl": "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+      "scope": "GIGACHAT_API_PERS",
+      "authKeyEnv": "GIGACHAT_AUTH_KEY",
+      "caFile": "certs/russian_trusted_root_ca_pem.crt",
+      "model": "GigaChat-2-Pro",
+      "maxConcurrent": 1,
+      "privacy": "ru-cloud",
+      "note": "Для подключения нужен ключ авторизации из кабинета GigaChat Studio. При проблеме с сертификатом установите корневой сертификат Минцифры в Windows."
+    },
+    {
+      "id": "zai",
+      "title": "Z.ai GLM-Flash",
+      "type": "openai",
+      "enabled": false,
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "apiKeyEnv": "ZAI_API_KEY",
+      "model": "glm-4.7-flash",
+      "privacy": "foreign-cloud",
+      "note": "Модель бесплатна по документации Z.ai. Доступность из России не подтверждена — сначала проверьте на своём интернете."
+    }
+  ]
+}

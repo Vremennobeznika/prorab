@@ -1,0 +1,17 @@
+{
+  "name": "Помощник по файлам",
+  "description": "Находит, читает, правит и создаёт файлы в рабочей папке. Каждое изменение — только с вашего разрешения.",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "write_file",
+    "replace_in_file",
+    "update_plan",
+    "delegate_agent"
+  ],
+  "mode": "manual",
+  "maxSteps": 12,
+  "models": [],
+  "localOnly": false
+}

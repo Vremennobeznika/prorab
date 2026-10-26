@@ -1,0 +1,6 @@
+{
+  "port": 7777,
+  "workspace": "./workspace",
+  "maxConcurrentRuns": 3,
+  "openBrowser": true
+}

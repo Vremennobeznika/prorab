@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Прораб</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14'/%3E%3Ctext x='32' y='47' font-size='40' font-weight='700' text-anchor='middle' fill='white' font-family='sans-serif'%3E%D0%9F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/theme.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">К рабочему пространству</a>
+  <div class="container">
+
+    <header class="top">
+      <div>
+        <h1>Прораб</h1>
+        <p class="subtitle" id="workspace-line"></p>
+      </div>
+      <div class="top-actions">
+        <button class="btn danger" id="stop-all" type="button" data-t="top.stopAll"></button>
+        <button class="icon-btn" id="theme-toggle" type="button"></button>
+      </div>
+    </header>
+
+    <p class="notice" id="status-line" role="status" hidden></p>
+
+    <nav class="tabs" id="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="control" data-t="tabs.control"></button>
+      <button class="tab" role="tab" data-tab="agents" data-t="tabs.agents"></button>
+      <button class="tab" role="tab" data-tab="models" data-t="tabs.models"></button>
+      <button class="tab" role="tab" data-tab="memory">Память</button>
+    </nav>
+
+    <main id="main-content">
+      <!-- Пульт: разрешения, постановка задачи, ход работы, список запусков -->
+      <section id="tab-control">
+        <div class="workbench">
+          <aside class="project-sidebar">
+            <h2 data-t="sessions.projects">Проекты</h2>
+            <label>Рабочая папка<select id="project-select"></select></label>
+            <details class="project-disclosure"><summary>Открыть папку проекта</summary><form id="project-form">
+              <label>Путь к папке<input id="project-path" type="text" placeholder="C:/Мои проекты/сайт" required></label>
+              <button id="choose-folder" class="btn ghost" type="button" hidden>Выбрать папку…</button>
+              <button class="btn ghost" type="submit">Добавить проект</button>
+              <p id="project-error" class="error" role="alert"></p>
+            </form></details>
+            <button id="new-session" class="btn" type="button">Новый диалог</button>
+            <h2 data-t="sessions.dialogues">Диалоги</h2><div id="session-list" class="list"></div>
+          </aside>
+          <div class="dialogue-main">
+            <h2 id="dialogue-title">Новый диалог</h2>
+            <div id="conversation" class="conversation" aria-live="polite"><p class="hint">Выберите проект и поставьте задачу. Диалог можно продолжить после закрытия приложения.</p></div>
+            <section id="session-plan" class="card" hidden><h3>План</h3><ol id="plan-steps"></ol></section>
+        <section id="setup-guide" class="card" hidden>
+          <h2>Первый запуск: подключите ИИ</h2>
+          <p>Программа открылась. Чтобы выполнять задания, выберите модель во вкладке «Модели» и укажите ключ, если он требуется.</p>
+          <button class="btn" type="button" id="go-setup">Подключить ИИ</button>
+        </section>
+        <div id="approvals" class="list"></div>
+
+        <form id="run-form" class="card" autocomplete="off">
+          <div class="composer-settings"><label><span data-t="form.agent"></span>
+            <select id="agent-select"></select>
+          </label>
+          <label>Модель<select id="model-select"></select></label>
+          </div><label><span class="sr-only" data-t="form.task"></span>
+            <textarea id="task" rows="2" maxlength="4000" data-t-placeholder="form.taskHint"></textarea>
+          </label>
+          <details class="composer-options"><summary>Память и критерии готовности</summary>
+            <label>Критерии готовности (необязательно)<textarea id="criteria" rows="3" maxlength="2000" placeholder="Например: отчёт содержит итоги по месяцам; исходные файлы не изменены"></textarea></label>
+          <label class="check-label"><input id="use-memory" type="checkbox"> Использовать память и прошлые задания</label>
+          <p class="hint">При включении подходящие заметки и прошлые задания этого агента передаются выбранной модели. Это задание тоже станет доступно для следующих запусков с памятью.</p>
+          </details>
+          <button class="btn" type="submit" data-t="form.start"></button>
+          <p class="error" id="form-error" role="alert"></p>
+        </form>
+
+        <details id="activity-panel"><summary>Ход работы</summary><section class="card run-view" id="run-view" hidden>
+          <div class="run-head">
+            <div>
+              <h2 id="run-title"></h2>
+              <span class="badge" id="run-status"></span>
+            </div>
+            <button class="btn ghost" id="run-stop" type="button" data-t="run.stop"></button>
+          </div>
+          <div class="log" id="log" aria-live="polite"></div>
+        </section></details>
+
+        <details class="run-archive"><summary>Журнал запусков и проверок</summary><div id="runs" class="list"></div></details>
+          </div>
+        </div>
+      </section>
+
+      <!-- Агенты -->
+      <section id="tab-agents" hidden>
+        <div id="agents-grid" class="grid"></div>
+      </section>
+
+      <!-- Модели -->
+      <section id="tab-models" hidden>
+        <p class="hint">Выберите нужную модель, включите её и сохраните. Для облачной модели понадобится её ключ доступа. Ключ сохраняется на этом компьютере. Поле очищается после сохранения, сам ключ остаётся в профиле.</p>
+        <p id="provider-result" role="status" aria-live="polite"></p>
+        <div id="models-grid" class="grid"></div>
+      </section>
+      <section id="tab-memory" hidden>
+        <h2>Память помощников</h2>
+        <p class="hint">Сохраняйте предпочтения и решения явно. Помощник подбирает записи по словам задания, если на пульте включена память. Прошлый ответ может содержать ошибки. Не сохраняйте здесь пароли и ключи.</p>
+        <form id="memory-form" class="card">
+          <label>Что запомнить<textarea id="memory-text" maxlength="2000" rows="3" required></textarea></label>
+          <label class="check-label"><input id="memory-pinned" type="checkbox" checked> Учитывать во всех заданиях с памятью (например, предпочтение)</label>
+          <label class="check-label"><input id="memory-local" type="checkbox" checked> Только для агентов с режимом «Только локальные модели»</label>
+          <p class="hint">Если снять отметку, заметка сможет передаваться облачной модели. Хранится она в папке данных на этом компьютере.</p>
+          <p id="memory-source" class="meta"></p>
+          <div class="btn-row"><button class="btn" type="submit">Сохранить заметку</button><button id="memory-cancel" class="btn ghost" type="button" hidden>Отменить изменение</button></div>
+        </form>
+        <p id="memory-result" role="status" aria-live="polite"></p>
+        <form id="memory-search" class="card">
+          <label>Поиск в заметках и завершённых заданиях<input id="memory-query" type="search" maxlength="4000" placeholder="Например: отчёт продажи"></label>
+          <button class="btn" type="submit">Найти</button>
+        </form>
+        <h2>Заметки</h2><div id="memory-notes" class="list"></div>
+        <h2>Прошлые задания</h2><div id="memory-history" class="list"><p class="hint">Введите слова для поиска.</p></div>
+      </section>
+    </main>
+
+    <footer class="footer" data-t="app.footer"></footer>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
