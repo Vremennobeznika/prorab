@@ -1,0 +1,978 @@
+--- a/.gitignore
++++ b/.gitignore
+@@ -7,0 +8,2 @@
++
++credentials.json
+--- a/WORKSPACE.md
++++ b/WORKSPACE.md
+@@ -1 +1 @@
+-# Прораб 0.4: проекты и диалоги
++# Прораб 0.4.1: проекты и диалоги
+@@ -52,0 +53,6 @@
++
++## Ключ модели
++
++Во вкладке «Модели» вставьте ключ через Ctrl+V, контекстное меню или кнопку «Вставить», затем нажмите «Сохранить». Отметка «Ключ сохранён» подтверждает запись в профиль. Пустое поле после сохранения нормально: сохранённый ключ не возвращается в интерфейс. Для замены введите новый.
++
++Ключи записываются в `credentials.json` в папке профиля пользователя, отдельно от общих настроек. Прежние ключи из `.env` также читаются. После перезапуска сохранённый ключ продолжает использоваться. Сохранение не проверяет действительность ключа у внешнего сервиса.
+--- a/package.json
++++ b/package.json
+@@ -3 +3 @@
+-  "version": "0.4.0",
++  "version": "0.4.1",
+--- a/packaging/Prorab.iss
++++ b/packaging/Prorab.iss
+@@ -2 +2 @@
+-#define MyAppVersion "0.4.0"
++#define MyAppVersion "0.4.1"
+@@ -10 +10 @@
+-OutputBaseFilename=Prorab-Setup-0.4.0
++OutputBaseFilename=Prorab-Setup-0.4.1
+--- a/packaging/ProrabLauncher.cs
++++ b/packaging/ProrabLauncher.cs
+@@ -37 +37,5 @@
+-        Width = 1280; Height = 900; MinimumSize = new Size(720, 560);
++        AutoScaleMode = AutoScaleMode.Dpi;
++        var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
++        Width = Math.Min(1024, screen.Width - 32);
++        Height = Math.Min(720, screen.Height - 32);
++        MinimumSize = new Size(640, 480);
+@@ -81 +85,6 @@
+-            var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(userDir, "WebView2"));
++            CoreWebView2EnvironmentOptions options = null;
++            int testPort;
++            if (int.TryParse(Environment.GetEnvironmentVariable("PRORAB_UI_TEST_PORT"), out testPort) && testPort > 1024 && testPort < 65536) {
++                options = new CoreWebView2EnvironmentOptions("--remote-debugging-port=" + testPort);
++            }
++            var environment = await CoreWebView2Environment.CreateAsync(null, Path.Combine(userDir, "WebView2"), options);
+@@ -84 +93 @@
+-            view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
++            view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
+@@ -90,0 +100,10 @@
++            view.KeyDown += async (s, e) => {
++                if ((e.Control && e.KeyCode == Keys.V) || (e.Shift && e.KeyCode == Keys.Insert)) {
++                    e.Handled = true; e.SuppressKeyPress = true;
++                    if (!IsApplicationUrl(view.Source.AbsoluteUri)) return;
++                    try {
++                        string value = Clipboard.ContainsText() ? Clipboard.GetText() : "";
++                        await view.CoreWebView2.ExecuteScriptAsync("window.ProrabInput && window.ProrabInput.insertClipboard(" + new JavaScriptSerializer().Serialize(value) + ")");
++                    } catch { /* The Paste button can retry if another process owns the clipboard. */ }
++                }
++            };
+@@ -94,0 +114 @@
++                    view.Focus();
+@@ -115 +135,12 @@
+-        if (!IsApplicationUrl(e.Source) || e.TryGetWebMessageAsString() != "choose-folder") return;
++        if (!IsApplicationUrl(e.Source)) return;
++        string message;
++        try { message = e.TryGetWebMessageAsString(); } catch { return; }
++        if (message.StartsWith("paste-key:", StringComparison.Ordinal)) {
++            string id = message.Substring("paste-key:".Length);
++            try {
++                var payload = new { type = "paste-key", providerId = id, text = Clipboard.ContainsText() ? Clipboard.GetText() : "" };
++                view.CoreWebView2.PostWebMessageAsJson(new JavaScriptSerializer().Serialize(payload));
++            } catch { view.CoreWebView2.PostWebMessageAsJson("{\"type\":\"clipboard-error\"}"); }
++            return;
++        }
++        if (message != "choose-folder") return;
+--- a/packaging/build-windows.ps1
++++ b/packaging/build-windows.ps1
+@@ -58 +58 @@
+-Get-FileHash (Join-Path $dist 'Prorab-Setup-0.4.0.exe') -Algorithm SHA256
++Get-FileHash (Join-Path $dist 'Prorab-Setup-0.4.1.exe') -Algorithm SHA256
+--- a/qa/memory-browser.py
++++ b/qa/memory-browser.py
+@@ -42,0 +43 @@
++        page.locator('.composer-options summary').click()
+@@ -44 +44,0 @@
+-        page.locator('#run-form summary').click()
+--- /dev/null
++++ b/qa/native-settings-smoke.mjs
+@@ -0,0 +1,68 @@
++// Runs on the Windows CI desktop against the real installed WebView2 window.
++// All keys are synthetic. No key or token is printed, including on failure.
++import assert from 'node:assert/strict';
++import { spawnSync } from 'node:child_process';
++let stage='connect';
++process.on('uncaughtException',(error)=>{console.error('::error::Native settings '+stage+': '+error.message.replace(/\r?\n/g,' '));process.exit(1);});
++const [port, pid] = process.argv.slice(2);
++const watchdog=setTimeout(()=>{console.error('Native UI regression timed out');process.exit(1);},45000);
++let target;
++for (let i = 0; i < 100; i++) {
++  try {
++    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
++    target = targets.find((t) => t.type === 'page' && t.url.startsWith('http://127.0.0.1:'));
++    if (target) break;
++  } catch { /* WebView2 debugging transport is still starting. */ }
++  await new Promise((resolve) => setTimeout(resolve, 100));
++}
++assert.ok(target, 'Installed native renderer unavailable');
++const socket = new WebSocket(target.webSocketDebuggerUrl);
++await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
++let id = 0;
++const pending = new Map();
++socket.onmessage = (event) => {
++  const message = JSON.parse(event.data);
++  if (message.id && pending.has(message.id)) {
++    const { resolve, reject } = pending.get(message.id); pending.delete(message.id);
++    if (message.error) reject(new Error('Native renderer command failed')); else resolve(message.result);
++  }
++};
++const send = (method, params) => new Promise((resolve, reject) => { const next = ++id; pending.set(next, { resolve, reject }); socket.send(JSON.stringify({ id: next, method, params })); });
++const evaluate = async (expression) => {
++  const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
++  if (result.exceptionDetails) throw new Error('Native renderer evaluation failed');
++  return result.result?.value;
++};
++async function wait(expression) {
++  for (let i = 0; i < 120; i++) { if (await evaluate(expression)) return; await new Promise((resolve) => setTimeout(resolve, 100)); }
++  throw new Error('Native settings readiness timed out');
++}
++try {
++  await wait("Boolean(document.querySelector('[data-tab=models]'))");
++  await evaluate("document.querySelector('[data-tab=models]').click()");
++  await wait("Boolean(document.getElementById('provider-key-zai'))");
++  const key = 'prorab-native-dummy#key';
++  if (process.env.PRORAB_UI_VERIFY_RESTART === '1') {
++    stage='restart indicator';
++    await wait("document.querySelector('[data-key-status=zai]').textContent === 'Ключ сохранён'");
++    assert.equal(await evaluate("document.getElementById('provider-key-zai').value === ''"), true);
++    assert.equal(await evaluate(`fetch('/api/state').then(r=>r.text()).then(text=>!text.includes(${JSON.stringify(key)}))`), true);
++    console.log('PASS: saved credential indicator survives native application restart; key is not returned by API');
++  } else {
++    stage='keyboard paste';
++    await evaluate("document.getElementById('provider-key-zai').focus()");
++    const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::SetText($env:PRORAB_UI_DUMMY); $shell=New-Object -ComObject WScript.Shell; $null=$shell.AppActivate([int]$env:PRORAB_UI_PID); Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('^v')`;
++    const result = spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', script], { env: { ...process.env, PRORAB_UI_DUMMY: key, PRORAB_UI_PID: pid }, stdio: 'pipe' });
++    assert.equal(result.status, 0, 'Windows keyboard/clipboard test command failed');
++    await wait(`document.getElementById('provider-key-zai').value === ${JSON.stringify(key)}`);
++    stage='polling stability';
++    // Verify a live polling cycle cannot discard the value being edited.
++    await new Promise((resolve) => setTimeout(resolve, 3000));
++    assert.equal(await evaluate(`document.getElementById('provider-key-zai').value === ${JSON.stringify(key)}`), true);
++    stage='save';
++    await evaluate("document.querySelector('[data-provider-id=zai] [name=enabled]').checked=true; document.querySelector('[data-provider-id=zai] button[type=submit]').click()");
++    await wait("document.querySelector('[data-key-status=zai]').textContent === 'Ключ сохранён'");
++    assert.equal(await evaluate("document.getElementById('provider-key-zai').value === ''"), true);
++    console.log('PASS: actual Windows Ctrl+V, stable native field during polling, UI save and saved-key confirmation');
++  }
++} finally { clearTimeout(watchdog); socket.close(); }
+--- /dev/null
++++ b/qa/settings-browser.py
+@@ -0,0 +1,60 @@
++"""Settings input/paste, stable polling, local persistence and compact layout regression."""
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++from playwright.sync_api import sync_playwright
++
++root = Path(__file__).resolve().parents[1]
++process = subprocess.Popen(['node', 'qa/settings-fixture.mjs'], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
++try:
++    fixture = json.loads(process.stdout.readline())
++    with sync_playwright() as p:
++        browser = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH', '/usr/bin/chromium'), headless=True, args=['--no-sandbox'])
++        page = browser.new_page(viewport={'width': 1000, 'height': 640}, permissions=['clipboard-read', 'clipboard-write'])
++        errors = []
++        page.on('pageerror', lambda error: errors.append(str(error)))
++        page.goto(fixture['base'] + '/?token=' + fixture['token'])
++        page.locator('[data-tab=models]').click()
++        field = page.locator('#provider-key-zai')
++        field.fill('dummy-before-poll')
++        page.evaluate("() => window.__keyField=document.getElementById('provider-key-zai')")
++        page.wait_for_timeout(5200)
++        assert field.input_value() == 'dummy-before-poll'
++        assert page.evaluate("() => window.__keyField === document.getElementById('provider-key-zai')")
++        field.select_text()
++        page.evaluate("() => navigator.clipboard.writeText('dummy-pasted#key')")
++        field.press('Control+v')
++        assert field.input_value() == 'dummy-pasted#key'
++        field.fill('')
++        page.locator('.key-controls button').first.click()
++        page.wait_for_function("() => document.getElementById('provider-key-zai').value === 'dummy-pasted#key'")
++        page.locator('[name=enabled]').check()
++        page.locator('.provider-form button[type=submit]').click()
++        page.wait_for_function("() => document.querySelector('[data-key-status]').textContent === 'Ключ сохранён'")
++        assert field.input_value() == ''
++        assert json.loads((Path(fixture['dir']) / 'credentials.json').read_text())['values']['DUMMY_KEY'] == 'dummy-pasted#key'
++        page.reload()
++        page.locator('[data-key-status]').wait_for()
++        assert page.locator('[data-key-status]').inner_text() == 'Ключ сохранён'
++        assert field.input_value() == ''
++        page.screenshot(path=str(Path(tempfile.gettempdir()) / 'prorab-settings-compact.png'), full_page=True)
++        page.locator('[data-tab=control]').click()
++        for width, height in [(1000, 640), (900, 600), (800, 540)]:
++            page.set_viewport_size({'width': width, 'height': height})
++            bounds = page.locator('#run-form button[type=submit]').bounding_box()
++            assert bounds['y'] + bounds['height'] <= height, (width, height, bounds)
++            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
++        page.set_viewport_size({'width': 1000, 'height': 640})
++        page.screenshot(path=str(Path(tempfile.gettempdir()) / 'prorab-workspace-compact.png'))
++        assert not errors, errors
++        browser.close()
++    print('PASS: typed key survives polling, keyboard/button paste, save indicator, profile persistence, reload, send button fits 3 compact windows')
++finally:
++    process.terminate()
++    try:
++        process.wait(timeout=5)
++    except subprocess.TimeoutExpired:
++        process.kill()
++        process.wait()
+--- /dev/null
++++ b/qa/settings-fixture.mjs
+@@ -0,0 +1,12 @@
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { launch } from '../src/launch.js';
++import { loadAgents } from '../src/agent/agents-store.js';
++import { fromRoot } from '../src/util/paths.js';
++const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prorab-settings-ui-'));
++const configs = [{ id: 'zai', title: 'Тестовая модель', model: 'test', type: 'openai', enabled: false, apiKeyEnv: 'DUMMY_KEY', baseUrl: 'http://127.0.0.1:9/v1' }];
++const configFile = path.join(dir, 'providers.json'); fs.writeFileSync(configFile, JSON.stringify({ providers: configs }));
++const running = await launch({ settings: { workspace: path.join(dir, 'workspace') }, agents: loadAgents(fromRoot('agents')), providerConfigs: configs, dataDir: path.join(dir, 'data'), env: {}, providerConfigFile: configFile, envFile: path.join(dir, '.env'), port: 0 });
++console.log(JSON.stringify({ base: `http://127.0.0.1:${running.port}`, token: running.token, dir }));
++process.on('SIGTERM', () => { running.server.closeAllConnections?.(); running.server.close(() => process.exit(0)); });
+--- a/qa/windows-installer-smoke.ps1
++++ b/qa/windows-installer-smoke.ps1
+@@ -79 +79,3 @@
+-  $launcher = Start-Process -FilePath (Join-Path $installDir 'Прораб.exe') -WorkingDirectory $installDir -PassThru
++  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,0)
++  $listener.Start(); $debugPort = $listener.LocalEndpoint.Port; $listener.Stop()
++  $launcher = Start-Process -FilePath (Join-Path $installDir 'Прораб.exe') -WorkingDirectory $installDir -Environment @{ PRORAB_UI_TEST_PORT = [string]$debugPort } -PassThru
+@@ -90,0 +93,20 @@
++  & (Join-Path $installDir 'runtime/node.exe') (Join-Path $PSScriptRoot 'native-settings-smoke.mjs') $debugPort $launcher.Id
++  if ($LASTEXITCODE -ne 0) { throw 'Native key paste/save regression failed' }
++  Stop-OwnedProcess $launcher
++  $launcher = $null
++
++  $started = Get-Date
++  $launcher = Start-Process -FilePath (Join-Path $installDir 'Прораб.exe') -WorkingDirectory $installDir -Environment @{ PRORAB_UI_TEST_PORT = [string]$debugPort } -PassThru
++  $restartReady = $null
++  for ($i = 0; $i -lt 150; $i++) {
++    if ($launcher.HasExited) { throw 'Native app exited during credential restart check' }
++    $candidate = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Prorab') -Filter 'launch-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started.AddSeconds(-1) } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
++    if ($candidate -and (Test-Path ($candidate.FullName + '.desktop'))) { $restartReady = $candidate; break }
++    Start-Sleep -Milliseconds 100
++  }
++  if (!$restartReady) { throw 'Native credential restart did not render' }
++  $env:PRORAB_UI_VERIFY_RESTART='1'
++  try {
++    & (Join-Path $installDir 'runtime/node.exe') (Join-Path $PSScriptRoot 'native-settings-smoke.mjs') $debugPort $launcher.Id
++    if ($LASTEXITCODE -ne 0) { throw 'Native saved key did not survive restart' }
++  } finally { Remove-Item Env:PRORAB_UI_VERIFY_RESTART }
+--- a/qa/workspace-browser.py
++++ b/qa/workspace-browser.py
+@@ -19,0 +20 @@
++        page.locator('.project-disclosure summary').click()
+--- a/src/app.js
++++ b/src/app.js
+@@ -15,0 +16 @@
++import { createCredentials } from './util/credentials.js';
+@@ -28 +29,3 @@
+-  let pool = createPool({ providers: buildProviders(providerConfigs, env), quota });
++  const credentials = envFile ? createCredentials(envFile, env) : null;
++  let providerEnv = credentials ? credentials.environment() : env;
++  let pool = createPool({ providers: buildProviders(providerConfigs, providerEnv), quota });
+@@ -48 +51 @@
+-    const nextEnv = { ...env };
++    const nextEnv = { ...providerEnv, ...credentials.environment() };
+@@ -51 +54 @@
+-    if (apiKey) nextEnv[envName] = apiKey.trim();
++    if (apiKey?.trim()) nextEnv[envName] = apiKey.trim();
+@@ -57,7 +60,2 @@
+-    // Не записываем секрет в JSON настроек или ответы API.
+-    if (apiKey) {
+-      const existing = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
+-      const without = existing.split(/\r?\n/).filter((line) => !line.startsWith(`${envName}=`)).join('\n').trim();
+-      fs.mkdirSync(path.dirname(envFile), { recursive: true });
+-      fs.writeFileSync(envFile, `${without ? `${without}\n` : ''}${envName}=${apiKey.trim()}\n`, { mode: 0o600 });
+-    }
++    // Persist non-secret config first. Memory state changes only after key storage succeeds.
++    if (apiKey?.trim()) credentials.put(envName, apiKey.trim());
+@@ -66 +64 @@
+-    if (apiKey) env[envName] = apiKey.trim();
++    providerEnv = nextEnv;
+@@ -184 +182,5 @@
+-      providers: pool.status(),
++      providers: pool.status().map((provider) => {
++        const config = providerConfigs.find((p) => p.id === provider.id);
++        const name = config.authKeyEnv || config.apiKeyEnv;
++        return { ...provider, requiresKey: Boolean(name), credentialSource: name ? credentials?.source(name) || (providerEnv[name] ? 'environment' : null) : null };
++      }),
+--- a/src/server.js
++++ b/src/server.js
+@@ -24,0 +25 @@
++  '/fonts/manrope.ttf': ['fonts/manrope-variable.ttf', 'font/ttf'],
+--- /dev/null
++++ b/src/util/credentials.js
+@@ -0,0 +1,37 @@
++// Local profile credentials are stored as JSON, so #, quotes and backslashes round-trip.
++// API responses expose presence only. Legacy .env values remain readable.
++import fs from 'node:fs';
++import path from 'node:path';
++import { parseEnv } from 'node:util';
++import { randomUUID } from 'node:crypto';
++import { UserError } from './errors.js';
++
++export function createCredentials(envFile, inherited) {
++  const file = path.join(path.dirname(envFile), 'credentials.json');
++  let saved = {};
++  let legacy = {};
++  try { legacy = parseEnv(fs.readFileSync(envFile, 'utf8')); }
++  catch (err) { if (err.code !== 'ENOENT') throw new Error('Не удалось прочитать прежние ключи из .env.'); }
++  try {
++    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
++    if (data.version !== 1 || !data.values || typeof data.values !== 'object' || Array.isArray(data.values)
++      || Object.values(data.values).some((v) => typeof v !== 'string')) throw new Error();
++    saved = data.values;
++  } catch (err) { if (err.code !== 'ENOENT') throw new Error('Не удалось прочитать credentials.json. Существующие ключи не изменены.'); }
++  function environment() { return { ...legacy, ...inherited, ...saved }; }
++  function put(name, value) {
++    const next = { ...saved, [name]: value };
++    const temporary = `${file}.${randomUUID()}.tmp`;
++    try {
++      fs.mkdirSync(path.dirname(file), { recursive: true });
++      fs.writeFileSync(temporary, JSON.stringify({ version: 1, values: next }, null, 2), { mode: 0o600, flag: 'wx' });
++      fs.renameSync(temporary, file);
++      saved = next;
++    } catch { throw new UserError('Ключ не сохранён. Проверьте доступ к папке данных и свободное место.', 503); }
++    finally { try { fs.unlinkSync(temporary); } catch { /* rename already removed the temporary file */ } }
++  }
++  function source(name) {
++    return saved[name] || legacy[name] ? 'profile' : inherited[name] ? 'environment' : null;
++  }
++  return { environment, put, source };
++}
+--- /dev/null
++++ b/test/credentials.test.js
+@@ -0,0 +1,69 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import http from 'node:http';
++import { test } from 'node:test';
++import { createCredentials } from '../src/util/credentials.js';
++import { launch } from '../src/launch.js';
++import { loadAgents } from '../src/agent/agents-store.js';
++import { fromRoot } from '../src/util/paths.js';
++
++function profile(t) {
++  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prorab-key-'));
++  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
++  return dir;
++}
++test('credentials: exact round-trip including #, quotes and backslashes; legacy .env remains usable', (t) => {
++  const dir = profile(t); const envFile = path.join(dir, '.env');
++  fs.writeFileSync(envFile, 'LEGACY_KEY=old\n');
++  const key = 'dummy#with"quotes\'and\\slashes';
++  const store = createCredentials(envFile, { OTHER_KEY: 'environment' });
++  assert.equal(store.environment().LEGACY_KEY, 'old');
++  assert.equal(store.source('OTHER_KEY'), 'environment');
++  store.put('LEGACY_KEY', key);
++  const restarted = createCredentials(envFile, { LEGACY_KEY: 'stale-environment' });
++  assert.equal(restarted.environment().LEGACY_KEY, key);
++  assert.equal(restarted.source('LEGACY_KEY'), 'profile');
++  assert.equal(fs.readFileSync(envFile, 'utf8'), 'LEGACY_KEY=old\n');
++  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'credentials.json')).mode & 0o777, 0o600);
++});
++test('credentials: failed write and corrupt file report failure without overwriting existing data', (t) => {
++  const dir = profile(t); const envFile = path.join(dir, '.env');
++  const store = createCredentials(envFile, {});
++  fs.mkdirSync(path.join(dir, 'credentials.json'));
++  assert.throws(() => store.put('TEST_KEY', 'dummy'), /не сохранён/);
++  assert.equal(store.source('TEST_KEY'), null);
++  fs.rmdirSync(path.join(dir, 'credentials.json'));
++  fs.writeFileSync(path.join(dir, 'credentials.json'), '{broken');
++  assert.throws(() => createCredentials(envFile, {}), /не изменены/);
++  assert.equal(fs.readFileSync(path.join(dir, 'credentials.json'), 'utf8'), '{broken');
++});
++test('saved key survives application restart, authenticates a model request and never returns through state', async (t) => {
++  const dir = profile(t); let authorization;
++  const model = http.createServer((req, res) => {
++    authorization = req.headers.authorization;
++    req.resume(); req.on('end', () => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message: { content: 'Подключение работает' } }] })); });
++  });
++  await new Promise((resolve) => model.listen(0, '127.0.0.1', resolve));
++  const configFile = path.join(dir, 'providers.json');
++  const options = { settings: { workspace: path.join(dir, 'workspace') }, agents: loadAgents(fromRoot('agents')), dataDir: path.join(dir, 'data'), env: {},
++    providerConfigFile: configFile, envFile: path.join(dir, '.env'), port: 0 };
++  const configs = [{ id: 'custom', type: 'openai', enabled: false, apiKeyEnv: 'TEST_MODEL_KEY', baseUrl: `http://127.0.0.1:${model.address().port}/v1`, model: 'test' }];
++  fs.writeFileSync(configFile, JSON.stringify({ providers: configs }));
++  let app = await launch({ ...options, providerConfigs: configs });
++  const close = async () => { app.app.stopAll(); app.server.closeAllConnections?.(); await new Promise((resolve) => app.server.close(resolve)); };
++  t.after(async () => { await close(); model.closeAllConnections?.(); await new Promise((resolve) => model.close(resolve)); });
++  const key = 'dummy-model-key#with-suffix';
++  const response = await fetch(`http://127.0.0.1:${app.port}/api/settings/provider`, { method: 'POST', headers: { Cookie: `prorab_token=${app.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ providerId: 'custom', enabled: true, apiKey: key }) });
++  assert.equal(response.status, 200);
++  await close();
++  app = await launch({ ...options, providerConfigs: JSON.parse(fs.readFileSync(configFile)).providers });
++  assert.equal(app.app.state().providers[0].credentialSource, 'profile');
++  assert.ok(!JSON.stringify(app.app.state()).includes(key));
++  const id = app.app.startRun('general-assistant', 'Ответь');
++  for (let i = 0; i < 100 && app.app.runs.get(id).status === 'running'; i++) await new Promise((resolve) => setTimeout(resolve, 10));
++  assert.equal(app.app.runs.get(id).status, 'done');
++  assert.equal(authorization, 'Bearer ' + key);
++  assert.ok(!fs.readFileSync(configFile, 'utf8').includes(key));
++});
+--- a/test/user-setup.test.js
++++ b/test/user-setup.test.js
+@@ -51 +51,2 @@
+-    assert.match(fs.readFileSync(envFile, 'utf8'), /FAKE_TEST_KEY=secret_12345/);
++    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'credentials.json'), 'utf8')).values.FAKE_TEST_KEY, 'secret_12345');
++    assert.equal(JSON.parse(json).providers[0].credentialSource, 'profile');
+--- a/web/app.js
++++ b/web/app.js
+@@ -12 +12 @@
+-    app: { footer: 'Прораб, версия 0.4.0' },
++    app: { footer: 'Прораб, версия 0.4.1' },
+@@ -14 +14 @@
+-      stopAll: '⛔ Стоп всех',
++      stopAll: 'Остановить',
+@@ -275,0 +276 @@
++  const providerDirty = new Set();
+@@ -277,28 +278,47 @@
+-    // pausedUntil меняется со временем, поэтому перерисовываем при любом изменении данных
+-    renderIfChanged('models', state.providers, () => {
+-      $('#models-grid').replaceChildren(
+-        ...state.providers.map((p) => {
+-          const used = fill(T.models.today, {
+-            requests: countWord(p.usage.requests, T.models.request),
+-            tokens: countWord(p.usage.tokens, T.models.token),
+-          });
+-          return h('div', { class: 'card' },
+-            h('h3', null, p.title),
+-            p.model ? h('p', { class: 'meta' }, `${T.models.model}: ${p.model}`) : null,
+-            h('p', null, h('span', { class: 'badge' }, T.models.privacy[p.privacy] || T.models.privacy.unknown)),
+-            h('p', null, providerStatus(p)),
+-            h('p', { class: 'meta' }, used),
+-            limitText(p),
+-            p.note ? h('p', { class: 'meta' }, p.note) : null,
+-            state.canConfigure ? h('form', { class: 'provider-form', onsubmit: (e) => saveProvider(e, p.id) },
+-              h('label', null, h('span', null, 'Доступ'),
+-                h('select', { name: 'enabled', 'aria-label': `Включить ${p.title}` },
+-                  h('option', { value: 'true', selected: p.enabled }, 'Включено'),
+-                  h('option', { value: 'false', selected: !p.enabled }, 'Выключено'))),
+-              ['gigachat', 'zai'].includes(p.id) ? h('label', null,
+-                'Ключ доступа (оставьте пустым, если он уже сохранён)',
+-                h('input', { name: 'apiKey', type: 'password', autocomplete: 'off', placeholder: 'Вставьте ключ' })) : null,
+-              h('button', { class: 'btn', type: 'submit' }, 'Сохранить')) : null);
+-        }),
+-      );
+-    });
++    // Forms have stable DOM identities. Polling may update status, never replace a typed key.
++    renderIfChanged('models', [state.canConfigure, state.providers.map((p) => p.id)], () => {
++      $('#models-grid').replaceChildren(...state.providers.map((p) => {
++        const keyInput = p.requiresKey ? h('input', { id: 'provider-key-' + p.id, name: 'apiKey', type: 'password', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Ключ доступа ' + p.title,
++          placeholder: 'Вставьте ключ доступа', oninput: () => providerDirty.add(p.id) }) : null;
++        return h('article', { class: 'card provider-card', 'data-provider-id': p.id },
++          h('div', { class: 'provider-heading' }, h('h3', null, p.title), h('span', { class: 'meta', 'data-key-status': p.id })),
++          h('p', { class: 'meta' }, p.model || ''),
++          h('p', { class: 'provider-state', 'data-provider-status': p.id, role: 'status' }),
++          state.canConfigure ? h('form', { class: 'provider-form', onsubmit: (e) => saveProvider(e, p.id) },
++            h('label', { class: 'check-label' }, h('input', { name: 'enabled', type: 'checkbox', checked: p.enabled, onchange: () => providerDirty.add(p.id) }), 'Использовать модель'),
++            keyInput ? h('label', { class: 'key-label' }, 'Ключ доступа', h('div', { class: 'key-controls' }, keyInput,
++              h('button', { class: 'btn ghost', type: 'button', onclick: () => pasteKey(p.id) }, 'Вставить'),
++              h('button', { class: 'btn ghost', type: 'button', 'aria-pressed': 'false', onclick: (event) => {
++                const visible = keyInput.type === 'password'; keyInput.type = visible ? 'text' : 'password';
++                event.currentTarget.textContent = visible ? 'Скрыть' : 'Показать'; event.currentTarget.setAttribute('aria-pressed', String(visible));
++              } }, 'Показать'))) : null,
++            h('p', { class: 'hint' }, p.requiresKey ? 'Сохранённый ключ не показывается повторно. Чтобы заменить его, введите новый.' : 'Ключ для локальной модели не нужен.'),
++            h('div', { class: 'provider-save-row' }, h('button', { class: 'btn', type: 'submit' }, 'Сохранить'), h('span', { class: 'provider-feedback', 'data-provider-feedback': p.id, role: 'status' }))) : null,
++          p.note ? h('details', { class: 'provider-help' }, h('summary', null, 'Подключение и данные'), h('p', { class: 'hint' }, p.note), h('p', { class: 'hint' }, T.models.privacy[p.privacy] || T.models.privacy.unknown)) : null);
++      }));
++    });
++    for (const p of state.providers) {
++      const card = [...$('#models-grid').children].find((node) => node.dataset.providerId === p.id);
++      if (!card) continue;
++      card.querySelector('[data-provider-status]').textContent = providerStatus(p);
++      card.querySelector('[data-key-status]').textContent = !p.requiresKey ? 'Без ключа' : p.credentialSource === 'profile' ? 'Ключ сохранён' : p.credentialSource === 'environment' ? 'Ключ из окружения' : 'Ключ не указан';
++      const enabled = card.querySelector('[name="enabled"]');
++      if (enabled && !providerDirty.has(p.id)) enabled.checked = p.enabled;
++    }
++  }
++
++  function insertClipboard(text, input = document.activeElement) {
++    if (!input || !(input instanceof HTMLTextAreaElement || (input instanceof HTMLInputElement && ['text', 'password', 'search', 'url', 'tel'].includes(input.type))) || input.readOnly || input.disabled) return false;
++    const value = String(text).replace(/\r?\n/g, input.name === 'apiKey' ? '' : '\n');
++    input.focus(); input.setRangeText(value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, 'end');
++    input.dispatchEvent(new Event('input', { bubbles: true }));
++    return true;
++  }
++  window.ProrabInput = { insertClipboard };
++
++  async function pasteKey(providerId) {
++    const input = document.getElementById('provider-key-' + providerId);
++    input.focus();
++    if (window.chrome?.webview) { window.chrome.webview.postMessage('paste-key:' + providerId); return; }
++    try { insertClipboard((await navigator.clipboard.readText()).trim(), input); }
++    catch { $('#provider-result').textContent = 'Нажмите Ctrl+V в поле ключа или выберите «Вставить» в контекстном меню.'; }
+@@ -311,4 +331,4 @@
+-    submit.disabled = true;
+-    $('#provider-result').textContent = 'Сохраняю настройки…';
+-    const payload = { providerId, enabled: form.elements.enabled.value === 'true' };
+-    if (form.elements.apiKey && form.elements.apiKey.value.trim()) payload.apiKey = form.elements.apiKey.value.trim();
++    const feedback = form.querySelector('[data-provider-feedback]');
++    submit.disabled = true; feedback.textContent = 'Сохраняю…';
++    const payload = { providerId, enabled: form.elements.enabled.checked };
++    if (form.elements.apiKey?.value.trim()) payload.apiKey = form.elements.apiKey.value.trim();
+@@ -317,2 +337,4 @@
+-      if (form.elements.apiKey) form.elements.apiKey.value = '';
+-      $('#provider-result').textContent = 'Настройки сохранены. Можно вернуться на «Пульт» и поставить задачу.';
++      if (form.elements.apiKey) { form.elements.apiKey.value = ''; form.elements.apiKey.type = 'password'; const toggle=form.querySelector('[aria-pressed]'); if(toggle){toggle.textContent='Показать';toggle.setAttribute('aria-pressed','false');} }
++      providerDirty.delete(providerId);
++      feedback.textContent = 'Сохранено';
++      $('#provider-result').textContent = 'Настройки сохранены на этом компьютере. Подключение к сервису ещё не проверено.';
+@@ -320,3 +342,2 @@
+-    } catch (err) {
+-      $('#provider-result').textContent = err.message;
+-    } finally { submit.disabled = false; }
++    } catch (err) { feedback.textContent = err.message; }
++    finally { submit.disabled = false; }
+@@ -603 +624 @@
+-    button.textContent = window.ProrabTheme.current() === 'dark' ? '☀️' : '🌙';
++    button.textContent = window.ProrabTheme.current() === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+@@ -652 +673,5 @@
+-      window.chrome.webview.addEventListener('message', (event) => { if (event.data?.type === 'folder') $('#project-path').value = event.data.path; });
++      window.chrome.webview.addEventListener('message', (event) => {
++        if (event.data?.type === 'folder') $('#project-path').value = event.data.path;
++        if (event.data?.type === 'paste-key') insertClipboard(String(event.data.text || '').trim(), document.getElementById('provider-key-' + event.data.providerId));
++        if (event.data?.type === 'clipboard-error') $('#provider-result').textContent = 'Буфер обмена занят. Повторите вставку.';
++      });
+--- /dev/null
++++ b/web/fonts/Manrope-OFL.txt
+@@ -0,0 +1,93 @@
++Copyright 2018 The Manrope Project Authors (https://github.com/googlefonts/manrope)
++
++This Font Software is licensed under the SIL Open Font License, Version 1.1.
++This license is copied below, and is also available with a FAQ at:
++http://scripts.sil.org/OFL
++
++
++-----------------------------------------------------------
++SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
++-----------------------------------------------------------
++
++PREAMBLE
++The goals of the Open Font License (OFL) are to stimulate worldwide
++development of collaborative font projects, to support the font creation
++efforts of academic and linguistic communities, and to provide a free and
++open framework in which fonts may be shared and improved in partnership
++with others.
++
++The OFL allows the licensed fonts to be used, studied, modified and
++redistributed freely as long as they are not sold by themselves. The
++fonts, including any derivative works, can be bundled, embedded, 
++redistributed and/or sold with any software provided that any reserved
++names are not used by derivative works. The fonts and derivatives,
++however, cannot be released under any other type of license. The
++requirement for fonts to remain under this license does not apply
++to any document created using the fonts or their derivatives.
++
++DEFINITIONS
++"Font Software" refers to the set of files released by the Copyright
++Holder(s) under this license and clearly marked as such. This may
++include source files, build scripts and documentation.
++
++"Reserved Font Name" refers to any names specified as such after the
++copyright statement(s).
++
++"Original Version" refers to the collection of Font Software components as
++distributed by the Copyright Holder(s).
++
++"Modified Version" refers to any derivative made by adding to, deleting,
++or substituting -- in part or in whole -- any of the components of the
++Original Version, by changing formats or by porting the Font Software to a
++new environment.
++
++"Author" refers to any designer, engineer, programmer, technical
++writer or other person who contributed to the Font Software.
++
++PERMISSION & CONDITIONS
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of the Font Software, to use, study, copy, merge, embed, modify,
++redistribute, and sell modified and unmodified copies of the Font
++Software, subject to the following conditions:
++
++1) Neither the Font Software nor any of its individual components,
++in Original or Modified Versions, may be sold by itself.
++
++2) Original or Modified Versions of the Font Software may be bundled,
++redistributed and/or sold with any software, provided that each copy
++contains the above copyright notice and this license. These can be
++included either as stand-alone text files, human-readable headers or
++in the appropriate machine-readable metadata fields within text or
++binary files as long as those fields can be easily viewed by the user.
++
++3) No Modified Version of the Font Software may use the Reserved Font
++Name(s) unless explicit written permission is granted by the corresponding
++Copyright Holder. This restriction only applies to the primary font name as
++presented to the users.
++
++4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
++Software shall not be used to promote, endorse or advertise any
++Modified Version, except to acknowledge the contribution(s) of the
++Copyright Holder(s) and the Author(s) or with their explicit written
++permission.
++
++5) The Font Software, modified or unmodified, in part or in whole,
++must be distributed entirely under this license, and must not be
++distributed under any other license. The requirement for fonts to
++remain under this license does not apply to any document created
++using the Font Software.
++
++TERMINATION
++This license becomes null and void if any of the above conditions are
++not met.
++
++DISCLAIMER
++THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
++OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
++COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
++DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
++OTHER DEALINGS IN THE FONT SOFTWARE.
+--- a/web/index.html
++++ b/web/index.html
+@@ -11,0 +12 @@
++  <a class="skip-link" href="#main-content">К рабочему пространству</a>
+@@ -34 +35 @@
+-    <main>
++    <main id="main-content">
+@@ -41 +42 @@
+-            <form id="project-form">
++            <details class="project-disclosure"><summary>Открыть папку проекта</summary><form id="project-form">
+@@ -46 +47 @@
+-            </form>
++            </form></details>
+@@ -62 +63 @@
+-          <label><span data-t="form.agent"></span>
++          <div class="composer-settings"><label><span data-t="form.agent"></span>
+@@ -66,2 +67,2 @@
+-          <label><span data-t="form.task"></span>
+-            <textarea id="task" rows="4" maxlength="4000" data-t-placeholder="form.taskHint"></textarea>
++          </div><label><span class="sr-only" data-t="form.task"></span>
++            <textarea id="task" rows="2" maxlength="4000" data-t-placeholder="form.taskHint"></textarea>
+@@ -69 +70 @@
+-          <details><summary>Как понять, что задача готова</summary>
++          <details class="composer-options"><summary>Память и критерии готовности</summary>
+@@ -71 +71,0 @@
+-          </details>
+@@ -73,0 +74 @@
++          </details>
+@@ -78 +79 @@
+-        <section class="card run-view" id="run-view" hidden>
++        <details id="activity-panel"><summary>Ход работы</summary><section class="card run-view" id="run-view" hidden>
+@@ -87 +88 @@
+-        </section>
++        </section></details>
+@@ -101 +102 @@
+-        <p class="hint">Выберите нужную модель, включите её и сохраните. Для облачной модели понадобится её ключ доступа. Ключ хранится только на этом компьютере, в папке данных программы. Он не отправляется в браузер после сохранения.</p>
++        <p class="hint">Выберите нужную модель, включите её и сохраните. Для облачной модели понадобится её ключ доступа. Ключ сохраняется на этом компьютере. Поле очищается после сохранения, сам ключ остаётся в профиле.</p>
+--- a/web/style.css
++++ b/web/style.css
+@@ -1,217 +1,81 @@
+-/* Прораб — оформление.
+-   Стиль взят с сайта enjigirling: чёрно-белая палитра, шрифт Inter, скругление 18 px, карточки,
+-   вкладки с подчёркиванием и кнопка темы 🌙 / ☀️. Цвета лежат в переменных ниже — меняйте только их. */
+-
+-/* Шрифт Inter лежит в папке fonts/ (лицензия SIL OFL), поэтому интерфейс не зависит от интернета. */
+-@font-face {
+-  font-family: 'Inter Variable';
+-  font-style: normal;
+-  font-display: swap;
+-  font-weight: 100 900;
+-  src: url(/fonts/inter-cyrillic.woff2) format('woff2-variations');
+-  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+-}
+-@font-face {
+-  font-family: 'Inter Variable';
+-  font-style: normal;
+-  font-display: swap;
+-  font-weight: 100 900;
+-  src: url(/fonts/inter-latin.woff2) format('woff2-variations');
+-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+-}
+-
+-/* ───────── Цвета: светлая тема ───────── */
+-:root {
+-  --bg: #ffffff;
+-  --block: #f5f5f5;
+-  --text: #000000;
+-  --text-soft: #333333;
+-  --border: #000000;
+-  --soft-border: rgba(127, 127, 127, 0.28);
+-  --btn-bg: #000000;
+-  --btn-text: #ffffff;
+-  --radius: 18px;
+-  color-scheme: light;
+-}
+-
+-/* ───────── Цвета: тёмная тема ───────── */
+-:root[data-theme='dark'] {
+-  --bg: #121212;
+-  --block: #1e1e1e;
+-  --text: #ffffff;
+-  --text-soft: #e0e0e0;
+-  --border: #ffffff;
+-  --btn-bg: #ffffff;
+-  --btn-text: #000000;
+-  color-scheme: dark;
+-}
+-
+-* { box-sizing: border-box; }
+-
+-html { -webkit-text-size-adjust: 100%; }
+-
+-body {
+-  margin: 0;
+-  background: var(--bg);
+-  color: var(--text);
+-  font-family: 'Inter Variable', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+-  font-size: 16px;
+-  line-height: 1.5;
+-  /* отступы от «челки» и системных панелей телефона */
+-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+-}
+-
+-.container { max-width: 1200px; margin: 0 auto; padding: 16px 16px 96px; }
+-
+-h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); line-height: 1.15; }
+-h2 { margin: 24px 0 12px; font-size: clamp(20px, 3vw, 24px); line-height: 1.25; }
+-
+-.subtitle, .hint { margin: 4px 0 0; color: var(--text-soft); font-size: 14px; word-break: break-all; }
+-.hint { word-break: normal; margin-bottom: 16px; }
+-
+-/* ───────── Шапка ───────── */
+-.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+-.top-actions { display: flex; align-items: center; gap: 8px; }
+-
+-.icon-btn {
+-  width: 44px; height: 44px; border-radius: 50%;
+-  border: 1px solid var(--soft-border); background: var(--block);
+-  font-size: 20px; line-height: 1; cursor: pointer;
+-}
+-
+-.notice {
+-  margin: 16px 0 0; padding: 12px 16px; border: 2px dashed var(--border);
+-  border-radius: var(--radius); font-weight: 600;
+-}
+-
+-/* ───────── Вкладки ───────── */
+-.tabs { display: flex; justify-content: center; gap: 4px; margin: 20px 0; border-bottom: 1px solid var(--soft-border); }
+-.tab {
+-  min-height: 44px; padding: 8px 18px; background: none; color: var(--text);
+-  border: 0; border-bottom: 2px solid transparent;
+-  font: inherit; font-weight: 600; cursor: pointer;
+-}
+-.tab[aria-selected='true'] { border-bottom-color: var(--border); }
+-
+-/* ───────── Карточки, сетки, кнопки ───────── */
+-.card {
+-  background: var(--block); border: 1px solid var(--soft-border);
+-  border-radius: var(--radius); padding: 16px; margin-bottom: 16px;
+-}
+-.card h3 { margin: 0 0 4px; font-size: 18px; }
+-.card p { margin: 6px 0; }
+-.card .meta { color: var(--text-soft); font-size: 14px; }
+-
+-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+-.grid .card { margin-bottom: 0; }
+-.list { display: grid; gap: 12px; }
+-.list > .card { margin-bottom: 0; }
+-
+-.btn {
+-  min-height: 44px; padding: 0 20px; border-radius: var(--radius);
+-  border: 2px solid var(--border); background: var(--btn-bg); color: var(--btn-text);
+-  font: inherit; font-weight: 600; cursor: pointer;
+-}
+-.btn.ghost { background: transparent; color: var(--text); }
+-.btn.danger { background: transparent; color: var(--text); border-width: 3px; }
+-.btn:disabled { opacity: 0.5; cursor: default; }
+-.btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+-.btn-row .btn { flex: 1 1 140px; }
+-
+-/* ───────── Форма ───────── */
+-label { display: block; margin-bottom: 14px; font-weight: 600; }
+-select, textarea, input[type="password"], input[type="search"], input[type="text"] {
+-  display: block; width: 100%; margin-top: 6px; padding: 12px;
+-  border: 1px solid var(--border); border-radius: 12px;
+-  background: var(--bg); color: var(--text);
+-  font: inherit; font-weight: 400;
+-}
+-textarea { min-height: 110px; resize: vertical; }
+-.error { min-height: 1.5em; margin: 10px 0 0; font-weight: 600; }
+-
+-/* ───────── Значки статусов: смысл всегда передаётся и знаком, и текстом, а не только цветом ───────── */
+-.badge {
+-  display: inline-block; padding: 2px 10px; border: 1px solid var(--border);
+-  border-radius: 999px; font-size: 13px; font-weight: 600; white-space: normal; max-width: 100%; overflow-wrap: anywhere;
+-}
+-.badge.strong { background: var(--btn-bg); color: var(--btn-text); }
+-
+-/* ───────── Запуски и журнал ───────── */
+-.run-item { cursor: pointer; }
+-.run-item[aria-current='true'] { border: 3px solid var(--border); padding: 14px; }
+-.run-item .task { margin: 6px 0 0; }
+-
+-.run-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+-.run-head h2 { margin: 0 0 8px; }
+-
+-.log { display: grid; gap: 8px; margin-top: 14px; max-height: 60vh; overflow: auto; }
+-.ev { padding: 8px 12px; background: var(--bg); border-left: 3px solid var(--border); border-radius: 0 12px 12px 0; }
+-.ev-title { font-size: 14px; font-weight: 600; }
+-.ev pre {
+-  margin: 4px 0 0; white-space: pre-wrap; word-break: break-word;
+-  font: inherit; font-size: 14px; color: var(--text-soft);
+-}
+-.ev.step { opacity: 0.6; font-size: 13px; }
+-.ev.tool { border-left-style: dotted; }
+-.ev.final { border-left-width: 7px; }
+-.ev.err { border-left-style: dashed; }
+-
+-/* ───────── Окно «Разрешить / Отклонить» ───────── */
+-.approval { background: var(--bg); border: 3px solid var(--border); }
+-.approval pre {
+-  max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 10px;
+-  background: var(--block); border-radius: 12px;
+-  white-space: pre-wrap; word-break: break-word; font: inherit; font-size: 14px;
+-}
+-
+-.footer { margin-top: 32px; color: var(--text-soft); font-size: 13px; text-align: center; }
+-
+-/* ───────── Телефон: вкладки уходят вниз, как в мобильных приложениях ───────── */
+-@media (max-width: 640px) {
+-  .tabs {
+-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; margin: 0;
+-    background: var(--bg); border-top: 1px solid var(--soft-border); border-bottom: 0;
+-    padding-bottom: env(safe-area-inset-bottom);
+-  }
+-  .tab { flex: 1; border-bottom: 0; border-top: 2px solid transparent; padding: 10px 6px; }
+-  .tab[aria-selected='true'] { border-top-color: var(--border); }
+-  .btn.danger { padding: 0 12px; }
+-}
+-
+-.provider-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--soft-border); }
+-.provider-form button { width: 100%; }
+-#setup-guide h2 { margin-top: 0; }
+-
+-.check-label { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+-.check-label input { flex: 0 0 auto; width: 20px; height: 20px; }
+-.memory-note p { white-space: pre-wrap; overflow-wrap: anywhere; }
+-
+-/* Проект и диалог — основное рабочее пространство. */
+-.container { max-width: 1600px; }
+-.workbench { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; align-items: start; }
+-.project-sidebar { border-right: 1px solid var(--soft-border); padding-right: 20px; position: sticky; top: 12px; max-height: 88vh; overflow: auto; }
+-.project-sidebar h2:first-child, .dialogue-main > h2 { margin-top: 0; }
+-.project-sidebar .btn { width: 100%; margin: 4px 0; padding: 8px; }
+-.project-sidebar input { font-size: 13px; }
+-.session-button { text-align: left; overflow-wrap: anywhere; }
+-.session-button[aria-current="true"] { border-width: 3px; }
+-.conversation { display: grid; gap: 14px; margin-bottom: 20px; }
+-.chat-message { padding: 14px 18px; border: 1px solid var(--soft-border); border-radius: 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+-.chat-message.user { background: var(--block); margin-left: 8%; }
+-.chat-message.assistant { margin-right: 4%; }
+-.chat-message h3 { margin: 0 0 8px; font-size: 14px; color: var(--text-soft); }
+-.chat-message p { margin: 0; }
+-#session-plan li { padding: 6px 0; overflow-wrap: anywhere; }
+-#session-plan h3 { margin: 0; }
+-#run-form { position: relative; }
+-.run-archive { margin-top: 20px; }
+-.run-archive .list { margin-top: 12px; }
+-summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+-@media (max-width: 820px) {
+- .workbench { grid-template-columns: 1fr; gap: 20px; }
+- .project-sidebar { position: static; border-right: 0; border-bottom: 1px solid var(--soft-border); padding: 0 0 16px; max-height: none; }
+- #session-list { display: flex; overflow-x: auto; }
+- #session-list .btn { min-width: 150px; max-width: 220px; flex-shrink: 0; }
+-}
+-
+-.conversation { max-height: 52vh; overflow-y: auto; padding-right: 4px; }
++/* Compact workspace with a shared visual scale. */
++@font-face{font-family:Manrope;src:url('/fonts/manrope.ttf') format('truetype');font-weight:200 800;font-style:normal;font-display:swap}
++:root{--bg:#ffffff;--block:#f5f5f5;--text:#181818;--text-soft:#626262;--border:#313131;--soft-border:#dedede;--btn-bg:#181818;--btn-text:#ffffff;--radius:12px;color-scheme:light;font-family:Manrope,system-ui,sans-serif}
++:root[data-theme='dark']{--bg:#181818;--block:#1f1f1f;--text:#ffffff;--text-soft:#bdbdbd;--border:#737373;--soft-border:#313131;--btn-bg:#ffffff;--btn-text:#181818;color-scheme:dark}
++*{box-sizing:border-box} [hidden]{display:none!important}
++html,body{margin:0;height:100%;background:var(--bg);color:var(--text)}
++body{font-size:14px;line-height:20px;font-weight:400}
++button,input,textarea,select{font:inherit;color:inherit}
++a{color:inherit;text-underline-offset:4px}
++button,a,input,select,textarea,summary{-webkit-tap-highlight-color:transparent}
++:is(button,a,input,select,textarea,summary):focus-visible{outline:2px solid var(--border);outline-offset:2px}
++button:active{transform:scale(.98)}
++button{transition:opacity 300ms cubic-bezier(.22,1,.36,1),background-color 300ms cubic-bezier(.22,1,.36,1)}
++button:disabled{opacity:.5;cursor:default}
++button:hover:not(:disabled){opacity:.8}
++.container{display:flex;flex-direction:column;gap:12px;max-width:1280px;height:100dvh;margin:0 auto;padding:12px 16px 8px}
++h1,h2,h3,p{margin:0}h1,h2,h3{text-wrap:balance;font-weight:600}p{text-wrap:pretty}
++h1{font-size:20px;line-height:28px}h2{font-size:18px;line-height:28px;margin-bottom:12px}h3{font-size:16px;line-height:24px}
++.top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0}
++.top>div:first-child{min-width:0}.subtitle{max-width:64ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-soft);font-size:12px;line-height:16px}
++.top-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
++.tabs{display:flex;gap:4px;align-self:flex-start;padding:4px;background:var(--block);border-radius:12px;flex-shrink:0}
++.tab{min-height:32px;border:0;border-radius:8px;background:transparent;padding:4px 12px;font-size:14px;line-height:20px;cursor:pointer;font-weight:500}
++.tab[aria-selected='true']{background:var(--btn-bg);color:var(--btn-text)}
++main{flex:1;min-height:0;overflow:auto}#tab-control{height:100%;min-height:0}
++.workbench{height:100%;display:grid;grid-template-columns:208px minmax(0,1fr);gap:16px;min-height:0}
++.project-sidebar{overflow:auto;min-width:0;padding:12px;background:var(--block);border-radius:12px}
++.project-sidebar h2{font-size:14px;line-height:20px;margin-bottom:8px}.project-sidebar h2:not(:first-child){margin-top:16px}
++.project-sidebar .btn{width:100%;padding:8px;margin:4px 0;font-size:14px;line-height:20px}
++.project-sidebar input{font-size:12px;line-height:16px}.project-disclosure{margin:8px 0}
++.project-disclosure summary{font-size:12px;line-height:16px}.project-disclosure form{margin-top:8px}
++.dialogue-main{display:flex;flex-direction:column;min-width:0;min-height:0;gap:8px}
++.dialogue-main>h2{font-size:16px;line-height:24px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
++.conversation{flex:1;min-height:64px;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:8px 4px}
++.conversation>.hint:only-child{margin:auto;max-width:40ch;text-align:center;padding:24px;color:var(--text-soft)}
++.chat-message{max-width:100%;flex-shrink:0;padding:12px;border-radius:12px;overflow-wrap:anywhere;white-space:pre-wrap}
++.chat-message.user{align-self:flex-end;max-width:88%;background:var(--block)}.chat-message.assistant{align-self:flex-start;max-width:96%;padding-left:4px}
++.chat-message h3{font-size:12px;line-height:16px;color:var(--text-soft);margin-bottom:4px}.chat-message p{max-width:72ch}
++.card{padding:16px;border-radius:12px;background:var(--block);margin-bottom:12px;min-width:0}.card p{margin:4px 0}.meta,.hint{font-size:12px;line-height:16px;color:var(--text-soft)}
++.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.grid .card{margin:0}
++.list{display:grid;gap:8px}.list>.card{margin:0}
++label{display:block;font-size:12px;line-height:16px;font-weight:500;margin-bottom:8px}
++input[type='text'],input[type='password'],input[type='search'],textarea,select{display:block;width:100%;margin-top:4px;padding:8px 12px;border:1px solid var(--soft-border);border-radius:8px;background:var(--bg);font-size:14px;line-height:20px;font-weight:400;min-height:40px}
++textarea{resize:vertical;min-height:64px;max-height:160px}.check-label{display:flex;align-items:center;gap:8px;min-height:32px;margin:0;font-size:14px;line-height:20px}.check-label input{width:16px;height:16px;flex-shrink:0;accent-color:var(--text)}
++.btn,.icon-btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 12px;border:1px solid transparent;border-radius:8px;background:var(--btn-bg);color:var(--btn-text);font-size:16px;line-height:24px;font-weight:600;cursor:pointer;text-decoration:none}
++.btn.ghost,.btn.danger,.icon-btn{background:transparent;color:var(--text);border-color:var(--soft-border)}
++.top-actions .btn,.top-actions .icon-btn{font-size:12px;line-height:16px;min-height:32px;padding:8px}
++.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.btn-row .btn{flex:1 1 auto}
++#run-form{display:grid;grid-template-columns:1fr auto;gap:8px;padding:12px;margin:0;flex-shrink:0}
++.composer-settings{display:grid;grid-template-columns:1fr 1fr;gap:12px;grid-column:1/-1}.composer-settings label{margin:0}
++.composer-settings select{font-size:12px;line-height:16px;min-height:32px;padding:4px 8px}
++#run-form>label{grid-column:1/-1;margin:0}#task{margin:0;min-height:64px;max-height:128px}
++.composer-options{align-self:center;min-width:0}.composer-options[open]{grid-column:1/-1}
++.composer-options summary{font-size:12px;line-height:16px}.composer-options>label{margin-top:8px}
++.composer-options .hint{max-width:64ch;margin-top:4px}#run-form>button[type='submit']{justify-self:end;align-self:end}
++#form-error:empty{display:none}#form-error{grid-column:1/-1}.error{font-size:12px;line-height:16px;margin:4px 0}
++summary{min-height:32px;display:flex;align-items:center;gap:4px;font-weight:500;cursor:pointer}summary::before{content:'›';font-size:16px}details[open]>summary::before{content:'⌄'}
++#session-plan{flex-shrink:0;margin:0;padding:8px 12px;max-height:96px;overflow:auto}#session-plan h3{font-size:12px;line-height:16px}#plan-steps{margin:4px 0 0;padding-left:16px}#plan-steps li{font-size:12px;line-height:16px;padding:2px 0}
++#activity-panel,.run-archive{flex-shrink:0}#activity-panel>summary,.run-archive>summary{font-size:12px;color:var(--text-soft)}
++#activity-panel[open]{max-height:192px;overflow:auto}#activity-panel .card{padding:8px;margin:0}#activity-panel .log{max-height:128px;overflow:auto;margin-top:8px}
++.run-archive .list{max-height:160px;overflow:auto}.run-item{cursor:pointer}.run-item[aria-current='true']{outline:2px solid var(--border)}
++.run-head{display:flex;justify-content:space-between;align-items:center;gap:8px}.run-head h2{font-size:14px;line-height:20px;margin:0}
++.badge{display:inline-block;max-width:100%;font-size:12px;line-height:16px;color:var(--text-soft);font-variant-numeric:tabular-nums}.badge.strong{color:var(--text)}
++.log{display:grid;gap:8px}.ev{padding:8px;background:var(--bg);border:1px solid var(--soft-border);border-radius:8px}.ev-title{font-size:12px;line-height:16px;font-weight:600}.ev pre{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:12px;line-height:16px}.ev.step{color:var(--text-soft)}
++.approval{border:1px solid var(--border);padding:12px}.approval pre{max-height:80px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:4px 0}.approval .btn{font-size:14px;line-height:20px}
++#setup-guide{padding:12px;margin:0;flex-shrink:0}#setup-guide h2{font-size:14px;line-height:20px;margin-bottom:4px}#setup-guide p{font-size:12px;line-height:16px;margin-bottom:8px}
++#models-grid{display:flex;flex-direction:column;max-width:720px;margin:16px auto;gap:12px}.provider-card{margin:0!important;border:1px solid var(--soft-border);background:var(--bg)}
++.provider-heading{display:flex;justify-content:space-between;align-items:center;gap:8px}.provider-heading h3{font-size:16px;line-height:24px}.provider-heading .meta{white-space:nowrap}
++.provider-state{font-size:12px;line-height:16px;color:var(--text-soft)}.provider-form{margin-top:12px}.key-label{margin-top:8px}.key-controls{display:flex;gap:8px;align-items:center}.key-controls input{min-width:0;flex:1;margin-top:0}.key-controls .btn{font-size:12px;line-height:16px;min-height:40px;padding:8px}
++.provider-save-row{display:flex;align-items:center;gap:12px;margin-top:12px}.provider-feedback{font-size:12px;line-height:16px;overflow-wrap:anywhere}.provider-help{margin-top:8px}.provider-help summary{font-size:12px;line-height:16px;color:var(--text-soft)}
++#tab-models>p{max-width:72ch;margin:8px auto}#provider-result:empty{display:none}
++#tab-memory{max-width:800px;margin:auto}#tab-memory>.hint{margin-bottom:16px}.memory-note p{white-space:pre-wrap;overflow-wrap:anywhere}
++.session-button{text-align:left;justify-content:flex-start;overflow-wrap:anywhere}.session-button[aria-current='true']{background:var(--btn-bg);color:var(--btn-text)}
++.notice{flex-shrink:0;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;line-height:16px}
++.footer{flex-shrink:0;color:var(--text-soft);text-align:right;font-size:12px;line-height:16px}
++.skip-link{position:fixed;left:12px;top:8px;padding:8px;background:var(--btn-bg);color:var(--btn-text);transform:translateY(-160%);z-index:10}.skip-link:focus{transform:none}
++.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
++@media(max-width:760px){.container{height:auto;min-height:100dvh;padding:12px;gap:8px}main{overflow:visible}#tab-control{height:auto}.workbench{height:auto;grid-template-columns:1fr;gap:12px}.project-sidebar{max-height:none}#session-list{display:flex;overflow-x:auto}#session-list .btn{max-width:208px;min-width:128px;flex-shrink:0}.project-sidebar>h2:not(:first-child){margin-top:8px}.dialogue-main{min-height:480px}.conversation{max-height:40dvh;min-height:96px}.top-actions .icon-btn{font-size:12px;max-width:96px}.top{gap:8px}.subtitle{max-width:32ch}.grid{grid-template-columns:1fr}.key-controls{flex-wrap:wrap}.key-controls input{flex-basis:100%}.provider-heading{align-items:flex-start}.provider-heading .meta{white-space:normal}.composer-settings{gap:8px}}
++@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
++#run-form{grid-template-columns:minmax(0,1fr) auto}.composer-settings{grid-template-columns:repeat(2,minmax(0,1fr))}.composer-settings label,.composer-settings select{min-width:0}
++@media(max-width:760px){.top{flex-wrap:wrap}.top>div:first-child{flex:1 1 128px}.tabs{max-width:100%;overflow-x:auto}.tab{padding:4px 8px}.composer-options summary{white-space:normal}}
