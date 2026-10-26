@@ -297,7 +297,9 @@ function backup(file, ctx) {
   const relative = path.relative(fs.realpathSync(ctx.workspace), file);
   const copy = path.join(ctx.backupDir, relative);
   fs.mkdirSync(path.dirname(copy), { recursive: true });
-  fs.copyFileSync(file, copy);
+  // Keep the pre-task snapshot. Later edits in the same run must not overwrite it.
+  try { fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
 }
 
 function runShell(command, ctx) {

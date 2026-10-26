@@ -30,7 +30,10 @@ export async function runAgent({ agent, task, runId, pool, runs, approvals, work
     { role: 'user', content: criteria ? `${task}\n\nКритерии готовности от пользователя:\n${criteria}` : task },
   ];
 
-  const checkpoint = () => onMessages?.(messages.slice(1 + history.length));
+  // Persist the conversation turn, not ephemeral recalled notes or the injected plan.
+  // Re-inject those from their current stores on the next request so deletion/revocation works.
+  const turnStart = messages.length - 1;
+  const checkpoint = () => onMessages?.(messages.slice(turnStart));
   checkpoint();
 
   for (let step = 1; step <= agent.maxSteps; step += 1) {
@@ -91,6 +94,9 @@ export async function runAgent({ agent, task, runId, pool, runs, approvals, work
       if (!approved) return report(call, 'Человек отклонил это действие. Предложи другой путь или объясни, что тебе нужно.');
     }
 
+    // An approval may resolve immediately before a stop arrives. Recheck at the
+    // effect boundary, not only at the beginning of the model step.
+    signal.throwIfAborted();
     try {
       return report(call, await tool.run(call.args, ctx));
     } catch (err) {

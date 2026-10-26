@@ -69,7 +69,7 @@ export function createPool({ providers, quota, now = () => Date.now() }) {
           return impl.chat({ messages, tools, signal });
         };
         const queue = queues.get(id);
-        const reply = await (queue ? queue(ask) : ask());
+        const reply = await (queue ? queue(ask, signal) : ask());
 
         quota.record(id, reply.usage);
         state.lastError = null;

@@ -20,7 +20,7 @@ else { throw 'Не найдена лицензия Node.js для включен
 foreach ($name in @('src','web','agents','config','certs')) {
   Copy-Item (Join-Path $root $name) (Join-Path $app $name) -Recurse -Force
 }
-foreach ($document in @('README.md','MEMORY.md','WORKSPACE.md','ORIGINS.md','THIRD_PARTY_NOTICES.md')) {
+foreach ($document in @('README.md','MEMORY.md','WORKSPACE.md','ORIGINS.md','THIRD_PARTY_NOTICES.md','QA_REPORT.md','HARNESS_COMPARISON.md')) {
   Copy-Item -LiteralPath (Join-Path $root $document) -Destination (Join-Path $app $document) -Force
 }
 # Official public CAs. Keep HTTPS verification enabled and fail the build on any error.
@@ -68,4 +68,4 @@ $inno = @(
 if (-not $inno) { throw 'Требуется Inno Setup 6 для формирования установщика.' }
 & $inno (Join-Path $PSScriptRoot 'Prorab.iss')
 if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора завершилась с кодом $LASTEXITCODE" }
-Get-FileHash (Join-Path $dist 'Prorab-Setup-0.5.0.exe') -Algorithm SHA256
+Get-FileHash (Join-Path $dist 'Prorab-Setup-0.5.1.exe') -Algorithm SHA256

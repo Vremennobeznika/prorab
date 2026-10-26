@@ -112,8 +112,8 @@
         <form id="memory-form" class="card">
           <label>Область заметки<select id="memory-scope"></select></label>
           <label>Тип<select id="memory-kind"><option value="fact">Факт</option><option value="preference">Предпочтение</option><option value="decision">Решение</option><option value="constraint">Ограничение</option></select></label>
-          <label>Тема (для выявления противоречий)<input id="memory-topic" maxlength="100" placeholder="Например: версия Node.js"></label>
-          <label>Папка ограничения (необязательно)<input id="memory-path" maxlength="200" placeholder="Например: src или docs"></label>
+          <label>Тема (для выявления противоречий)<input id="memory-topic" type="text" maxlength="100" placeholder="Например: версия Node.js"></label>
+          <label>Папка ограничения (необязательно)<input id="memory-path" type="text" maxlength="200" placeholder="Например: src или docs"></label>
           <label>Что запомнить<textarea id="memory-text" maxlength="2000" rows="3" required></textarea></label>
           <label class="check-label"><input id="memory-pinned" type="checkbox" checked> Учитывать во всех заданиях с памятью (например, предпочтение)</label>
           <label class="check-label"><input id="memory-local" type="checkbox" checked> Только для агентов с режимом «Только локальные модели»</label>

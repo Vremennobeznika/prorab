@@ -53,14 +53,19 @@ export function createMemory({ file }) {
     if (typeof topic !== 'string' || topic.length > 100) throw new UserError('Тема: максимум 100 символов.');
     if (typeof pathPrefix !== 'string' || pathPrefix.length > 200 || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(pathPrefix) || path.isAbsolute(pathPrefix)) throw new UserError('Путь ограничения должен быть внутри проекта.');
     const notes = read();
-    const previous = id === undefined ? null : notes.find((n) => n.id === id);
+    const canonicalPrefix = pathPrefix ? path.posix.normalize(pathPrefix.replaceAll('\\', '/')).replace(/\/$/, '') : '';
+    const prefix = canonicalPrefix === '.' ? '' : canonicalPrefix;
+    let previous = id === undefined ? null : notes.find((n) => n.id === id);
     if (id !== undefined && !previous) throw new UserError('Заметка не найдена.', 404);
-    const duplicate = !previous && notes.find((n) => n.status !== 'archived' && n.status !== 'rejected' && normalized(n.text) === normalized(text) && (n.workspacePath || null) === workspacePath && n.localOnly === localOnly && (n.pathPrefix || '') === pathPrefix);
-    if (duplicate) return duplicate;
+    const duplicate = !previous && notes.find((n) => n.status !== 'archived' && n.status !== 'rejected' && normalized(n.text) === normalized(text) && (n.workspacePath || null) === workspacePath && n.localOnly === localOnly && (n.pathPrefix || '') === prefix);
+    if (duplicate) {
+      if (status === 'accepted' && duplicate.status === 'pending') previous = duplicate;
+      else return duplicate;
+    }
     if (!previous && notes.length >= 500) throw new UserError('В памяти уже 500 заметок. Удалите ненужные.', 409);
     const now = new Date().toISOString();
     const note = { id: previous?.id || randomUUID(), text: text.trim(), localOnly, pinned, sourceLocalOnly: previous?.sourceLocalOnly || sourceLocalOnly,
-      sourceRunId: previous?.sourceRunId || sourceRunId, workspacePath, kind, evidence, topic: topic.trim(), pathPrefix: pathPrefix ? path.posix.normalize(pathPrefix.replaceAll('\\', '/')).replace(/\/$/, '') : '', status, createdAt: previous?.createdAt || now, updatedAt: now };
+      sourceRunId: previous?.sourceRunId || sourceRunId, workspacePath, kind, evidence: evidence || previous?.evidence || '', topic: topic.trim(), pathPrefix: prefix, status, createdAt: previous?.createdAt || now, updatedAt: now };
     save([...notes.filter((n) => n.id !== note.id), note]);
     return note;
   }
@@ -88,7 +93,7 @@ export function createMemory({ file }) {
   function constraints(workspacePath, localOnly, filePath) {
     const canonical = (value) => { const normalizedPath = path.posix.normalize(String(value).replaceAll('\\', '/')); return process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath; };
     const target = canonical(filePath);
-    return read().filter((n) => active(n) && n.kind === 'constraint' && inScope(n, workspacePath) && (!n.localOnly || localOnly) && (!n.pathPrefix || target === canonical(n.pathPrefix) || target.startsWith(canonical(n.pathPrefix) + '/')));
+    return read().filter((n) => active(n) && n.kind === 'constraint' && inScope(n, workspacePath) && (!n.localOnly || localOnly) && (!n.pathPrefix || canonical(n.pathPrefix) === '.' || target === canonical(n.pathPrefix) || target.startsWith(canonical(n.pathPrefix) + '/')));
   }
   function remove(id) {
     const notes = read();

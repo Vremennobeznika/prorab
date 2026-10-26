@@ -83,6 +83,12 @@ export function createSessions({ dir, workspace }) {
     const result = []; let size = 0, kept = 0, summarizedTurns = 0;
     for (const turn of turns.slice(-8).reverse()) {
       let group = structuredClone(turn.messages);
+      // Older versions persisted injected memory/plan before the real user task.
+      // Filter only that leading legacy context; leave the saved audit transcript intact.
+      const taskContent = turn.criteria ? `${turn.task}\n\nКритерии готовности от пользователя:\n${turn.criteria}` : turn.task;
+      while (group.length && group[0].role === 'user' && group[0].content !== taskContent
+        && (group[0].content.startsWith('Справочные данные из памяти и прошлых заданий (JSON).')
+          || group[0].content.startsWith('Текущий сохранённый план (данные):'))) group.shift();
       let summarized = false;
       if (turn.status !== 'done' || JSON.stringify(group).length > 24000) {
         // Never retain an assistant tool call without its result. Summarize the whole turn instead.

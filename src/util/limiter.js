@@ -9,15 +9,29 @@ export function createLimiter(max) {
   let active = 0; // сколько задач выполняется прямо сейчас
   const waiting = []; // кто ждёт свободного места
 
-  return async function run(task) {
+  return async function run(task, signal) {
+    signal?.throwIfAborted();
     if (active >= max) {
       // Ждём. Место нам передадут напрямую (active при этом не уменьшается),
       // поэтому «влезть без очереди» новичок не сможет.
-      await new Promise((resolve) => waiting.push(resolve));
+      await new Promise((resolve, reject) => {
+        const grant = () => { signal?.removeEventListener('abort', cancel); resolve(); };
+        const cancel = () => {
+          const index = waiting.indexOf(grant);
+          if (index < 0) return;
+          waiting.splice(index, 1);
+          signal?.removeEventListener('abort', cancel);
+          reject(signal.reason);
+        };
+        waiting.push(grant);
+        if (signal?.aborted) cancel();
+        else signal?.addEventListener('abort', cancel, { once: true });
+      });
     } else {
       active += 1;
     }
     try {
+      signal?.throwIfAborted();
       return await task();
     } finally {
       const next = waiting.shift();

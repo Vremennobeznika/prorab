@@ -169,7 +169,18 @@ export function createApp({ settings, providerConfigs, agents, dataDir, env = pr
           }
         }
         signal.throwIfAborted();
-        if (session) sessions.finish(session.id, id, result.status === 'done' ? 'done' : 'failed', result.answer);
+        if (session) {
+          if (result.status === 'done') {
+            // The final displayed answer may include a separate review. Preserve it in
+            // model history too, so the next message can act on the review findings.
+            const turn = sessions.get(session.id).turns.find((t) => t.runId === id);
+            const messages = structuredClone(turn.messages);
+            const last = messages.at(-1);
+            if (last?.role === 'assistant' && !last.toolCalls?.length) last.content = result.answer;
+            sessions.record(session.id, id, messages);
+          }
+          sessions.finish(session.id, id, result.status === 'done' ? 'done' : 'failed', result.answer);
+        }
         runs.finish(id, result.status === 'done' ? 'done' : 'failed', { answer: result.answer });
       })
       .catch((err) => {
