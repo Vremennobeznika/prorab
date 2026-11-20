@@ -210,16 +210,23 @@ export const TOOLS = {
  * This heuristic is defense in depth, not a complete data-loss prevention system.
  */
 function denySensitiveRead(file, workspace) {
-  const parts = path.relative(fs.realpathSync(workspace), file).split(path.sep).map((part) => part.toLowerCase());
+  const root = fs.realpathSync(workspace);
+  const candidates = [file];
+  // A harmless-looking symlink may point at an internal secret: inspect the
+  // canonical target too, not only the model-supplied lexical path.
+  try { candidates.push(fs.realpathSync(file)); } catch { /* stat/read reports missing files later */ }
   const dirs = new Set(['.git', '.ssh', '.aws', '.kube', '.gnupg', '.docker']);
-  const name = parts.at(-1) || '';
   const config = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', '.gitconfig', 'known_hosts', 'authorized_keys']);
-  if (parts.slice(0, -1).some((part) => dirs.has(part))
-    || /^\.env(?:\.|$)/.test(name) || config.has(name)
-    || /^id_(?:rsa|ed25519|ecdsa)(?:\.|$)/.test(name)
-    || /\.(?:pem|key|p8|p12|pfx|kdbx|keystore|jks)$/.test(name)
-    || /^(?:credentials?|secrets?|tokens?|passwords?)(?:[._-]|$)/.test(name)) {
-    throw new Error('Автоматическое чтение файлов с ключами и секретами запрещено. Откройте файл вручную в редакторе.');
+  for (const candidate of candidates) {
+    const parts = path.relative(root, candidate).split(path.sep).map((part) => part.toLowerCase());
+    const name = parts.at(-1) || '';
+    if (parts.slice(0, -1).some((part) => dirs.has(part))
+      || /^\.env(?:\.|$)/.test(name) || config.has(name)
+      || /^id_(?:rsa|ed25519|ecdsa)(?:\.|$)/.test(name)
+      || /\.(?:pem|key|p8|p12|pfx|kdbx|keystore|jks)$/.test(name)
+      || /^(?:credentials?|secrets?|tokens?|passwords?)(?:[._-]|$)/.test(name)) {
+      throw new Error('Автоматическое чтение файлов с ключами и секретами запрещено. Откройте файл вручную в редакторе.');
+    }
   }
 }
 

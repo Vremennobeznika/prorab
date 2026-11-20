@@ -138,3 +138,15 @@ test('read_file: секреты внутри рабочей папки не пе
   put('.github/workflows/build.yml', 'workflow: safe');
   assert.equal(await TOOLS.read_file.run({ path: '.github/workflows/build.yml' }, ctx), 'workflow: safe');
 });
+
+test('read_file: ссылка с обычным именем на секрет не обходит защиту', async (t) => {
+  const { ctx, put, workspace } = setup();
+  put('.env', 'DO_NOT_EXPOSE');
+  try {
+    fs.symlinkSync(path.join(workspace, '.env'), path.join(workspace, 'обычный.txt'));
+  } catch {
+    t.skip('ОС не разрешила создавать символические ссылки');
+    return;
+  }
+  await assert.rejects(TOOLS.read_file.run({ path: 'обычный.txt' }, ctx), /секретами запрещено/);
+});
