@@ -68,4 +68,4 @@ $inno = @(
 if (-not $inno) { throw 'Требуется Inno Setup 6 для формирования установщика.' }
 & $inno (Join-Path $PSScriptRoot 'Prorab.iss')
 if ($LASTEXITCODE -ne 0) { throw "Сборка инсталлятора завершилась с кодом $LASTEXITCODE" }
-Get-FileHash (Join-Path $dist 'Prorab-Setup-0.5.1.exe') -Algorithm SHA256
+Get-FileHash (Join-Path $dist 'Prorab-Setup-0.5.2.exe') -Algorithm SHA256

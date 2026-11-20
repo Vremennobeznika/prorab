@@ -234,3 +234,11 @@ test('предел одновременных запусков: лишний з�
     await model.close();
   }
 });
+
+test('POST API отклоняет JSON неправильного типа без внутренней ошибки', async () => {
+  for (const body of ['null', '[]', '42', '"строка"', 'true']) {
+    const response = await fetch(base + '/api/settings/provider', { method: 'POST', headers, body });
+    assert.equal(response.status, 400, body);
+    assert.match((await response.json()).error, /JSON-объект/);
+  }
+});

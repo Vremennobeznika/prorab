@@ -265,9 +265,14 @@ async function readJsonBody(req) {
     chunks.push(chunk);
   }
   if (size === 0) return {};
+  let body;
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
     throw new UserError('Не удалось разобрать JSON в запросе.', 400);
   }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new UserError('Команда должна содержать JSON-объект.', 400);
+  }
+  return body;
 }

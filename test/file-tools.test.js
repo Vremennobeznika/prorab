@@ -125,3 +125,16 @@ test('Windows: зарезервированные и хитрые имена р�
     assert.equal(isUnsafeWindowsName(good), false, good);
   }
 });
+
+test('read_file: секреты внутри рабочей папки не передаются модели', async () => {
+  const { ctx, put, workspace } = setup();
+  for (const name of ['.env', '.env.production', '.npmrc', 'credentials.json', 'secret.key', 'token.json',
+    'id_ed25519', 'certs/client.p12', '.git/config', '.ssh/id_rsa', '.aws/credentials', 'nested/passwords.txt']) {
+    fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
+    put(name, 'DO_NOT_EXPOSE');
+    await assert.rejects(TOOLS.read_file.run({ path: name }, ctx), /секретами запрещено/, name);
+  }
+  fs.mkdirSync(path.join(workspace, '.github', 'workflows'), { recursive: true });
+  put('.github/workflows/build.yml', 'workflow: safe');
+  assert.equal(await TOOLS.read_file.run({ path: '.github/workflows/build.yml' }, ctx), 'workflow: safe');
+});

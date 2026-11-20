@@ -61,6 +61,7 @@ export const TOOLS = {
     describe: (a) => ({ title: `Прочитать файл «${a?.path ?? ''}»`, details: '' }),
     async run(a, ctx) {
       const file = resolveInside(ctx.workspace, text(a, 'path'));
+      denySensitiveRead(file, ctx.workspace);
       if (fs.statSync(file).isDirectory()) throw new Error('Это папка, а не файл. Используйте list_files.');
       return clip(toLf(readText(file)), MAX_READ_CHARS); // модель видит переводы строк одинаково — «\n»
     },
@@ -203,6 +204,24 @@ export const TOOLS = {
     run: (a, ctx) => runShell(text(a, 'command'), ctx),
   },
 };
+
+/**
+ * Block model-initiated reads of common secret locations inside a workspace.
+ * This heuristic is defense in depth, not a complete data-loss prevention system.
+ */
+function denySensitiveRead(file, workspace) {
+  const parts = path.relative(fs.realpathSync(workspace), file).split(path.sep).map((part) => part.toLowerCase());
+  const dirs = new Set(['.git', '.ssh', '.aws', '.kube', '.gnupg', '.docker']);
+  const name = parts.at(-1) || '';
+  const config = new Set(['.npmrc', '.pypirc', '.netrc', '.git-credentials', '.gitconfig', 'known_hosts', 'authorized_keys']);
+  if (parts.slice(0, -1).some((part) => dirs.has(part))
+    || /^\.env(?:\.|$)/.test(name) || config.has(name)
+    || /^id_(?:rsa|ed25519|ecdsa)(?:\.|$)/.test(name)
+    || /\.(?:pem|key|p8|p12|pfx|kdbx|keystore|jks)$/.test(name)
+    || /^(?:credentials?|secrets?|tokens?|passwords?)(?:[._-]|$)/.test(name)) {
+    throw new Error('Автоматическое чтение файлов с ключами и секретами запрещено. Откройте файл вручную в редакторе.');
+  }
+}
 
 /** Описания инструментов в том виде, в котором их получает модель. */
 export function toolSchemas(names) {
