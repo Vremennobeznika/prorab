@@ -1,0 +1,16 @@
+{
+  "name": "Инструкции и документация",
+  "description": "Готовит README, инструкции и справку для обычных людей. Пример: «Сделай понятную инструкцию к проекту».",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "write_file",
+    "replace_in_file",
+    "update_plan"
+  ],
+  "mode": "manual",
+  "maxSteps": 16,
+  "models": [],
+  "localOnly": false
+}

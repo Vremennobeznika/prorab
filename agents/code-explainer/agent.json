@@ -1,0 +1,14 @@
+{
+  "name": "Объяснитель кода",
+  "description": "Только читает файлы и объясняет, как они устроены, простыми словами. Ничего не меняет.",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "update_plan"
+  ],
+  "mode": "manual",
+  "maxSteps": 10,
+  "models": [],
+  "localOnly": false
+}

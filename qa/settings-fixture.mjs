@@ -1,0 +1,12 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { launch } from '../src/launch.js';
+import { loadAgents } from '../src/agent/agents-store.js';
+import { fromRoot } from '../src/util/paths.js';
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prorab-settings-ui-'));
+const configs = [{ id: 'zai', title: 'Тестовая модель', model: 'test', type: 'openai', enabled: false, apiKeyEnv: 'DUMMY_KEY', baseUrl: 'http://127.0.0.1:9/v1' }];
+const configFile = path.join(dir, 'providers.json'); fs.writeFileSync(configFile, JSON.stringify({ providers: configs }));
+const running = await launch({ settings: { workspace: path.join(dir, 'workspace') }, agents: loadAgents(fromRoot('agents')), providerConfigs: configs, dataDir: path.join(dir, 'data'), env: {}, providerConfigFile: configFile, envFile: path.join(dir, '.env'), port: 0 });
+console.log(JSON.stringify({ base: `http://127.0.0.1:${running.port}`, token: running.token, dir }));
+process.on('SIGTERM', () => { running.server.closeAllConnections?.(); running.server.close(() => process.exit(0)); });

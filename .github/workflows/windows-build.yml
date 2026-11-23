@@ -1,0 +1,89 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'web/**'
+      - 'agents/**'
+      - 'config/**'
+      - 'packaging/**'
+      - 'test/**'
+      - 'scripts/**'
+      - 'qa/**'
+      - 'package.json'
+      - 'README.md'
+      - '.github/workflows/windows-build.yml'
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Unit & integration tests
+        shell: pwsh
+        run: node --test
+      - name: Installed-mode smoke test
+        shell: pwsh
+        run: node qa/smoke-installed.mjs
+      - name: Simulated agent load test
+        shell: pwsh
+        run: node qa/load-agent.mjs
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build Windows setup
+        shell: powershell
+        run: |
+          $script = (Resolve-Path './packaging/build-windows.ps1').Path
+          $source = Get-Content -LiteralPath $script -Raw -Encoding UTF8
+          [System.IO.File]::WriteAllText($script, $source, [System.Text.UTF8Encoding]::new($true))
+          & $script
+      - name: Smoke test packaged application
+        shell: pwsh
+        run: |
+          if (!(Test-Path build/runtime/node.exe)) { throw 'Bundled Node runtime missing' }
+          if (!(Test-Path build/app/src/main.js)) { throw 'Application entrypoint missing' }
+          $env:PRORAB_USER_DIR = Join-Path $env:RUNNER_TEMP 'prorab-packaged-user'
+          $ready = Join-Path $env:RUNNER_TEMP 'prorab-ready.json'
+          $entry = (Resolve-Path 'build/app/src/main.js').Path
+          $p = Start-Process -FilePath (Resolve-Path 'build/runtime/node.exe').Path -ArgumentList @(('"' + $entry + '"'),'--no-open','--port','0','--ready-file', ('"' + $ready + '"')) -PassThru -WorkingDirectory (Resolve-Path 'build/app').Path
+          try {
+            $found = $false
+            for ($i=0; $i -lt 100; $i++) {
+              if (Test-Path $ready) { $found = $true; break }
+              if ($p.HasExited) { throw 'Packaged server exited early' }
+              Start-Sleep -Milliseconds 100
+            }
+            if (!$found) { throw 'Packaged server failed to become ready' }
+            $data = Get-Content $ready -Raw | ConvertFrom-Json
+            $response = Invoke-WebRequest -Uri $data.url -UseBasicParsing -TimeoutSec 10
+            if ($response.StatusCode -ne 200) { throw 'Packaged HTTP smoke test failed' }
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Locate versioned installer
+        id: installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $path = "dist/Prorab-Setup-$version.exe"
+          if (!(Test-Path -LiteralPath $path)) { throw "Installer missing for version $version" }
+          "path=$path" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Get-FileHash -LiteralPath $path -Algorithm SHA256
+      - name: Verify installed desktop, credentials and retained data
+        shell: pwsh
+        run: ./qa/windows-installer-smoke.ps1 -Installer (Resolve-Path '${{ steps.installer.outputs.path }}').Path
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prorab-Windows-Setup-${{ steps.installer.outputs.version }}
+          path: ${{ steps.installer.outputs.path }}
+          if-no-files-found: error

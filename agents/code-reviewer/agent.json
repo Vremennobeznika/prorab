@@ -1,0 +1,14 @@
+{
+  "name": "Ревью кода",
+  "description": "Находит ошибки, риски и сложные места без изменения файлов. Пример: «Проверь код проекта на ошибки».",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "update_plan"
+  ],
+  "mode": "manual",
+  "maxSteps": 16,
+  "models": [],
+  "localOnly": false
+}

@@ -1,0 +1,15 @@
+{
+  "name": "Проверка и тесты QA",
+  "description": "Проводит аудит и при разрешении запускает локальные тесты. Пример: «Проверь проект по матрице QA».",
+  "tools": [
+    "list_files",
+    "read_file",
+    "search_files",
+    "run_command",
+    "update_plan"
+  ],
+  "mode": "manual",
+  "maxSteps": 20,
+  "models": [],
+  "localOnly": false
+}

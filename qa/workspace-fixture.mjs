@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { launch } from '../src/launch.js';
+import { loadAgents } from '../src/agent/agents-store.js';
+import { fromRoot } from '../src/util/paths.js';
+import { startFakeModel } from '../scripts/lib/fake-model.js';
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prorab-workspace-ui-'));
+const workspace = path.join(dir, 'workspace');
+const other = path.join(dir, 'Второй проект');
+fs.mkdirSync(workspace); fs.mkdirSync(other);
+const fake = await startFakeModel((messages) => {
+  const last = messages.at(-1);
+  if (last.role === 'tool') return { content: 'План сохранён. Жду следующего сообщения.' };
+  if (last.content.includes('Составь план')) return { toolCall: { name: 'update_plan', args: { steps: [{ text: 'Прочитать проект', status: 'in_progress' }, { text: 'Проверить результат', status: 'pending' }] } } };
+  return { content: 'Продолжаю диалог. Помню первую задачу: ' + messages.find((m) => m.role === 'user').content };
+});
+const running = await launch({ settings: { workspace }, providerConfigs: [{ id: 'test', type: 'openai', title: 'Тестовая модель', enabled: true, baseUrl: `http://127.0.0.1:${fake.port}/v1`, model: 'test', privacy: 'local' }], agents: loadAgents(fromRoot('agents')), dataDir: path.join(dir, 'data'), port: 0 });
+console.log(JSON.stringify({ base: `http://127.0.0.1:${running.port}`, token: running.token, other }));
+process.on('SIGTERM', () => { running.app.stopAll(); running.server.closeAllConnections?.(); running.server.close(); fake.close().then(() => process.exit(0)); });
